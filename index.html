@@ -163,11 +163,19 @@
       letter-spacing: 2px;
     }
 
+    .timer-ring {
+      font-size: 32px;
+      font-weight: 900;
+      color: var(--neon-pink);
+      margin: 10px 0;
+      text-shadow: 0 0 15px var(--neon-pink);
+    }
+
     .question-text {
       font-size: 22px;
       font-weight: 700;
       line-height: 1.3;
-      margin: 10px 0 20px 0;
+      margin: 10px 0 15px 0;
       color: #fff;
     }
 
@@ -179,11 +187,27 @@
       margin-bottom: 15px;
     }
 
-    .vote-counter-text {
-      color: var(--neon-cyan);
-      font-size: 16px;
+    .voters-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+
+    .voter-badge {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
       font-weight: 700;
-      margin: 0;
+      background: rgba(255, 255, 255, 0.1);
+      color: #aaa;
+    }
+
+    .voter-badge.done {
+      background: rgba(0, 184, 148, 0.2);
+      border: 1px solid #00b894;
+      color: #00b894;
     }
 
     .loser-stage {
@@ -241,7 +265,8 @@
   <!-- ENTRY SCREEN -->
   <div id="entry-screen" class="card">
     <h2 style="margin-top:0">Party Game Studio</h2>
-    <input type="text" id="join-code-input" placeholder="Enter 4-Digit Room Code" maxlength="4">
+    <input type="text" id="player-name-input" placeholder="Your Name">
+    <input type="text" id="join-code-input" placeholder="4-Digit Room Code" maxlength="4">
     <button class="btn btn-cyan" onclick="joinRoom()">Join Game</button>
     <div style="margin: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.1);"></div>
     <button class="btn btn-primary" onclick="showHostSetup()">Host New Game</button>
@@ -250,7 +275,8 @@
   <!-- HOST SETUP SCREEN -->
   <div id="setup-screen" class="card hidden">
     <h2>Host Control Center</h2>
-    <input type="text" id="player-names" placeholder="Player Names (e.g. Sam, Alex, Maya)">
+    <input type="text" id="host-name" placeholder="Host Player Name">
+    <input type="text" id="player-names" placeholder="Player Names (comma separated e.g. Sam, Alex, Maya)">
     <p style="color: #aaa; margin: 10px 0 0 0; font-size: 13px;">Paste Questions List Below:</p>
     <textarea id="game-questions" placeholder="Paste your questions here..." oninput="updateCount()"></textarea>
     <div id="question-count" style="color: var(--neon-cyan); font-weight: 700; font-size: 14px; margin-bottom: 10px;">0 Questions Detected</div>
@@ -264,21 +290,25 @@
       <div id="qrcode"></div>
     </div>
     <div id="q-tracker" class="q-tracker"></div>
+    <div id="timer-display" class="timer-ring">10</div>
     <div id="display-question" class="question-text"></div>
 
+    <!-- HOST STATUS DASHBOARD -->
     <div id="host-tracker" class="host-dashboard hidden">
-      <p id="live-vote-count" class="vote-counter-text">Votes Cast: 0 / 0</p>
+      <div style="color: var(--neon-cyan); font-size: 13px; font-weight:700;">LIVE VOTER TRACKER:</div>
+      <div id="voters-list" class="voters-grid"></div>
     </div>
 
-    <div id="voting-instruction" style="color: #aaa; font-size: 13px;">CAST YOUR VOTE:</div>
+    <div id="voting-instruction" style="color: #aaa; font-size: 13px;">TAP A NAME TO VOTE (CAN CHANGE ANYTIME):</div>
     <div id="players-list" class="vote-grid"></div>
-    <button id="results-btn" class="btn btn-cyan hidden" onclick="showResults()" style="margin-top:25px;">Reveal Results 📊</button>
+    <button id="results-btn" class="btn btn-cyan hidden" onclick="triggerResults()" style="margin-top:25px;">Reveal Results 📊</button>
   </div>
 
   <!-- RESULTS SCREEN -->
   <div id="result-screen" class="card hidden">
-    <div class="q-tracker">THE FINAL TALLY</div>
-    <div id="tally-display" style="margin-top: 15px;"></div>
+    <div class="q-tracker">QUESTION RECAP</div>
+    <div id="reveal-question-text" class="question-text" style="font-size: 18px; margin-bottom: 15px;"></div>
+    <div id="tally-display"></div>
     
     <div class="loser-stage">
       <div id="loser-header" class="loser-title">Takes The Shot 🥃</div>
@@ -286,6 +316,14 @@
     </div>
 
     <button id="next-btn" class="btn btn-primary hidden" onclick="nextQuestion()" style="margin-top:25px;">Next Question ➔</button>
+  </div>
+
+  <!-- FINAL LEADERBOARD SCREEN -->
+  <div id="leaderboard-screen" class="card hidden">
+    <div class="q-tracker">HALL OF FAME 🏆</div>
+    <h2 style="color: var(--neon-gold); margin: 5px 0 15px 0;">NIGHT TOTALS</h2>
+    <div id="leaderboard-display"></div>
+    <button class="btn btn-cyan" onclick="location.reload()" style="margin-top:25px;">Play Again 🔄</button>
   </div>
 
   <script type="module">
@@ -298,12 +336,36 @@
 
     let currentRoomCode = "";
     let isHost = false;
+    let localPlayerName = "";
+    let timerInterval = null;
+
+    // Web Audio API Synthesizer for SFX
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playTone(freq, duration, type="sine") {
+      try {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+        osc.stop(audioCtx.currentTime + duration);
+      } catch(e){}
+    }
+
+    function sfxTick() { playTone(800, 0.05, "square"); }
+    function sfxBuzzer() { playTone(150, 0.4, "sawtooth"); }
+    function sfxFanfare() {
+      playTone(523.25, 0.15); setTimeout(() => playTone(659.25, 0.15), 150); setTimeout(() => playTone(783.99, 0.3), 300);
+    }
 
     const urlParams = new URLSearchParams(window.location.search);
     const urlRoom = urlParams.get('room');
     if (urlRoom) {
       document.getElementById('join-code-input').value = urlRoom;
-      setTimeout(joinRoom, 500);
     }
 
     function parseQuestions(rawText) {
@@ -327,38 +389,65 @@
     };
 
     window.createRoom = function() {
-      const names = document.getElementById("player-names").value.split(",").map(n => n.trim()).filter(n => n);
+      const hostName = document.getElementById("host-name").value.trim();
+      const rawNames = document.getElementById("player-names").value.split(",").map(n => n.trim()).filter(n => n);
       const rawQuestions = document.getElementById("game-questions").value;
       const questions = parseQuestions(rawQuestions);
 
-      if (!names.length) return alert("Enter player names!");
+      if (!hostName) return alert("Enter your name as host!");
+      if (!rawNames.length) return alert("Enter player names!");
       if (!questions.length) return alert("Paste at least one question!");
 
+      const names = Array.from(new Set([hostName, ...rawNames]));
+      localPlayerName = hostName;
       currentRoomCode = Math.floor(1000 + Math.random() * 9000).toString();
       isHost = true;
 
-      let votes = {};
-      names.forEach(n => votes[n] = 0);
+      let grandTotals = {};
+      names.forEach(n => grandTotals[n] = 0);
 
       const roomRef = ref(db, "rooms/" + currentRoomCode);
       set(roomRef, {
         players: names,
         questions: questions,
         currentQIndex: 0,
-        votes: votes,
-        votersCount: 0,
+        roundVotes: {},
+        voters: {},
+        grandTotals: grandTotals,
+        timer: 10,
         status: "voting"
       }).then(() => {
         listenToRoom();
+        startHostTimer();
       });
     };
 
     window.joinRoom = function() {
+      const name = document.getElementById("player-name-input").value.trim();
       const code = document.getElementById("join-code-input").value.trim();
-      if (!code) return alert("Enter a room code!");
+      if (!name) return alert("Enter your name to join!");
+      if (!code) return alert("Enter a 4-digit room code!");
+      
+      localPlayerName = name;
       currentRoomCode = code;
       listenToRoom();
     };
+
+    function startHostTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      let timeLeft = 10;
+      update(ref(db, "rooms/" + currentRoomCode), { timer: timeLeft });
+
+      timerInterval = setInterval(() => {
+        timeLeft--;
+        if (timeLeft >= 0) {
+          update(ref(db, "rooms/" + currentRoomCode), { timer: timeLeft });
+        } else {
+          clearInterval(timerInterval);
+          triggerResults();
+        }
+      }, 1000);
+    }
 
     function listenToRoom() {
       const roomRef = ref(db, "rooms/" + currentRoomCode);
@@ -375,28 +464,38 @@
         const totalQ = data.questions.length;
         const currentIdx = data.currentQIndex;
         const currentQuestion = data.questions[currentIdx];
-        const totalPlayers = data.players.length;
-        const totalVotesCast = data.votersCount || 0;
 
         if (data.status === "voting") {
           document.getElementById("vote-screen").classList.remove("hidden");
           document.getElementById("result-screen").classList.add("hidden");
+          document.getElementById("leaderboard-screen").classList.add("hidden");
+          
           document.getElementById("q-tracker").innerText = `QUESTION ${currentIdx + 1} OF ${totalQ}`;
           document.getElementById("display-question").innerText = currentQuestion;
+
+          // Sync 10s Timer
+          const timerBox = document.getElementById("timer-display");
+          if (timerBox.innerText !== String(data.timer)) {
+            timerBox.innerText = data.timer;
+            if (data.timer > 0 && data.timer <= 5) sfxTick();
+            if (data.timer === 0) sfxBuzzer();
+          }
 
           if (isHost) {
             document.getElementById("results-btn").classList.remove("hidden");
             document.getElementById("host-tracker").classList.remove("hidden");
-            document.getElementById("live-vote-count").innerText = `Votes Cast: ${totalVotesCast} / ${totalPlayers}`;
 
-            const resBtn = document.getElementById("results-btn");
-            if (totalVotesCast >= totalPlayers && totalPlayers > 0) {
-              resBtn.className = "btn btn-gold";
-              resBtn.innerText = "All Votes In! Reveal Results 📊";
-            } else {
-              resBtn.className = "btn btn-cyan";
-              resBtn.innerText = "Reveal Results 📊";
-            }
+            // Live Voter Badges for Host
+            const votersList = document.getElementById("voters-list");
+            votersList.innerHTML = "";
+            const currentVoters = data.voters || {};
+
+            data.players.forEach(p => {
+              const hasVoted = currentVoters[p];
+              const badgeClass = hasVoted ? "voter-badge done" : "voter-badge";
+              const badgeIcon = hasVoted ? "✓" : "...";
+              votersList.innerHTML += `<div class="${badgeClass}">${p} ${badgeIcon}</div>`;
+            });
 
             if (document.getElementById("qrcode").innerHTML === "") {
               document.getElementById("qr-container").classList.remove("hidden");
@@ -405,75 +504,116 @@
             }
           }
 
-          const votedKey = "voted_" + currentRoomCode + "_q" + currentIdx;
-          const hasVoted = localStorage.getItem(votedKey);
-
+          // Render Voting Grid with Changeable Votes
           const list = document.getElementById("players-list");
           list.innerHTML = "";
+          const myCurrentChoice = data.voters ? data.voters[localPlayerName] : null;
+
           data.players.forEach(p => {
-            const isSelected = hasVoted === p;
+            const isSelected = myCurrentChoice === p;
             const btnClass = isSelected ? "vote-btn selected" : "vote-btn";
-            const btnText = isSelected ? `${p} ✓ Voted` : p;
-            list.innerHTML += `<button class="${btnClass}" onclick="castVote('${p}', '${currentIdx}')">${btnText}</button>`;
+            const btnText = isSelected ? `${p} ✓` : p;
+            list.innerHTML += `<button class="${btnClass}" onclick="castVote('${p}')">${btnText}</button>`;
           });
         }
 
         if (data.status === "results") {
+          if (timerInterval) clearInterval(timerInterval);
           document.getElementById("vote-screen").classList.add("hidden");
           document.getElementById("result-screen").classList.remove("hidden");
 
-          if (isHost) document.getElementById("next-btn").classList.remove("hidden");
+          document.getElementById("reveal-question-text").innerText = currentQuestion;
+
+          if (isHost) {
+            const nextBtn = document.getElementById("next-btn");
+            nextBtn.classList.remove("hidden");
+            if (currentIdx + 1 >= totalQ) {
+              nextBtn.innerText = "See Final Standings 🏆";
+            } else {
+              nextBtn.innerText = "Next Question ➔";
+            }
+          }
 
           let tallyHtml = "";
           let maxVotes = -1;
           let losers = [];
 
-          // Determine highest vote count and all players tied for top spot
-          for (let [player, count] of Object.entries(data.votes || {})) {
-            tallyHtml += `<div class="tally-row"><span>${player}</span><span style="color:var(--neon-cyan)">${count} Votes</span></div>`;
+          // Compute Tally
+          for (let p of data.players) {
+            const count = (data.roundVotes && data.roundVotes[p]) ? data.roundVotes[p] : 0;
+            tallyHtml += `<div class="tally-row"><span>${p}</span><span style="color:var(--neon-cyan)">${count} Votes</span></div>`;
             if (count > maxVotes) {
               maxVotes = count;
-              losers = [player];
+              losers = [p];
             } else if (count === maxVotes && count > 0) {
-              losers.push(player);
+              losers.push(p);
             }
           }
 
           document.getElementById("tally-display").innerHTML = tallyHtml;
 
-          if (losers.length > 1) {
+          if (maxVotes <= 0) {
+            document.getElementById("loser-header").innerText = "NO VOTES CAST!";
+            document.getElementById("loser-name").innerText = "Nobody Drinks";
+          } else if (losers.length > 1) {
             document.getElementById("loser-header").innerText = "IT'S A TIE! BOTH TAKE A SHOT 🥃";
             document.getElementById("loser-name").innerText = losers.join(" & ");
+            sfxFanfare();
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
           } else {
             document.getElementById("loser-header").innerText = "Takes The Shot 🥃";
-            document.getElementById("loser-name").innerText = losers[0] || "Nobody";
+            document.getElementById("loser-name").innerText = losers[0];
+            sfxFanfare();
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
           }
+        }
 
-          confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        if (data.status === "leaderboard") {
+          document.getElementById("result-screen").classList.add("hidden");
+          document.getElementById("leaderboard-screen").classList.remove("hidden");
+
+          let sorted = Object.entries(data.grandTotals || {}).sort((a,b) => b[1] - a[1]);
+          let boardHtml = "";
+          sorted.forEach(([player, count], idx) => {
+            const medal = idx === 0 ? "🥇 " : idx === 1 ? "🥈 " : idx === 2 ? "🥉 " : "";
+            boardHtml += `<div class="tally-row"><span>${medal}${player}</span><span style="color:var(--neon-gold)">${count} Total Shots</span></div>`;
+          });
+          document.getElementById("leaderboard-display").innerHTML = boardHtml;
+          confetti({ particleCount: 200, spread: 100, origin: { y: 0.4 } });
         }
       });
     }
 
-    window.castVote = function(name, qIndex) {
-      const votedKey = "voted_" + currentRoomCode + "_q" + qIndex;
-      if (localStorage.getItem(votedKey)) return; 
-
-      localStorage.setItem(votedKey, name);
-
+    window.castVote = function(targetName) {
       onValue(ref(db, `rooms/${currentRoomCode}`), (snapshot) => {
         const data = snapshot.val();
-        if (!data) return;
+        if (!data || data.status !== "voting") return;
 
-        const currentVotes = (data.votes && data.votes[name]) ? data.votes[name] : 0;
-        const newVotersCount = (data.votersCount || 0) + 1;
+        const previousVote = data.voters ? data.voters[localPlayerName] : null;
+        if (previousVote === targetName) return; 
 
-        update(ref(db, `rooms/${currentRoomCode}/votes`), { [name]: currentVotes + 1 });
-        update(ref(db, `rooms/${currentRoomCode}`), { votersCount: newVotersCount });
+        let newRoundVotes = { ...(data.roundVotes || {}) };
+        let newGrandTotals = { ...(data.grandTotals || {}) };
+
+        // Subtract previous choice if changing vote
+        if (previousVote) {
+          newRoundVotes[previousVote] = Math.max(0, (newRoundVotes[previousVote] || 1) - 1);
+          newGrandTotals[previousVote] = Math.max(0, (newGrandTotals[previousVote] || 1) - 1);
+        }
+
+        // Add new vote
+        newRoundVotes[targetName] = (newRoundVotes[targetName] || 0) + 1;
+        newGrandTotals[targetName] = (newGrandTotals[targetName] || 0) + 1;
+
+        update(ref(db, `rooms/${currentRoomCode}/roundVotes`), newRoundVotes);
+        update(ref(db, `rooms/${currentRoomCode}/grandTotals`), newGrandTotals);
+        update(ref(db, `rooms/${currentRoomCode}/voters`), { [localPlayerName]: targetName });
       }, { onlyOnce: true });
     };
 
-    window.showResults = function() {
+    window.triggerResults = function() {
       if (!isHost) return;
+      if (timerInterval) clearInterval(timerInterval);
       update(ref(db, "rooms/" + currentRoomCode), { status: "results" });
     };
 
@@ -485,18 +625,18 @@
         const nextIndex = data.currentQIndex + 1;
 
         if (nextIndex >= data.questions.length) {
-          alert("Party Game Over! 🎉");
+          update(ref(db, "rooms/" + currentRoomCode), { status: "leaderboard" });
           return;
         }
 
-        let resetVotes = {};
-        data.players.forEach(p => resetVotes[p] = 0);
-
         update(ref(db, "rooms/" + currentRoomCode), {
           currentQIndex: nextIndex,
-          votes: resetVotes,
-          votersCount: 0,
+          roundVotes: {},
+          voters: {},
+          timer: 10,
           status: "voting"
+        }).then(() => {
+          startHostTimer();
         });
       }, { onlyOnce: true });
     };
