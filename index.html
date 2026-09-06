@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Who's Most Likely To? 🥃</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <!-- Canvas Confetti Library for Game Show Victory Effect -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
   
@@ -82,7 +81,6 @@
       box-shadow: 0 0 15px rgba(0, 243, 255, 0.3);
     }
 
-    /* Game Show Buttons */
     .btn {
       width: 100%;
       padding: 16px;
@@ -109,9 +107,20 @@
       box-shadow: 0 8px 25px rgba(0, 243, 255, 0.4);
     }
 
+    .btn-gold {
+      background: linear-gradient(135deg, var(--neon-gold), #ff5500);
+      color: #000;
+      box-shadow: 0 8px 25px rgba(255, 183, 0, 0.6);
+      animation: pulseGold 1s infinite alternate;
+    }
+
+    @keyframes pulseGold {
+      from { transform: scale(0.98); }
+      to { transform: scale(1.03); }
+    }
+
     .btn:active { transform: scale(0.96); }
 
-    /* Player Voting Buttons */
     .vote-grid { display: grid; gap: 10px; margin-top: 15px; }
 
     .vote-btn {
@@ -126,10 +135,11 @@
       transition: all 0.2s;
     }
 
-    .vote-btn:active {
-      background: var(--neon-pink);
-      border-color: var(--neon-pink);
-      box-shadow: 0 0 20px var(--neon-pink);
+    .vote-btn.selected {
+      background: #00b894 !important;
+      border-color: #00b894 !important;
+      color: #fff !important;
+      box-shadow: 0 0 20px rgba(0, 184, 148, 0.6);
     }
 
     .room-badge {
@@ -161,7 +171,21 @@
       color: #fff;
     }
 
-    /* Results Winner Stage */
+    .host-dashboard {
+      background: rgba(0, 243, 255, 0.05);
+      border: 1px dashed var(--neon-cyan);
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 15px;
+    }
+
+    .vote-counter-text {
+      color: var(--neon-cyan);
+      font-size: 16px;
+      font-weight: 700;
+      margin: 0;
+    }
+
     .loser-stage {
       background: linear-gradient(135deg, rgba(255, 0, 127, 0.2), rgba(255, 183, 0, 0.2));
       border: 2px solid var(--neon-gold);
@@ -240,7 +264,13 @@
     </div>
     <div id="q-tracker" class="q-tracker"></div>
     <div id="display-question" class="question-text"></div>
-    <div style="color: #aaa; font-size: 13px;">CAST YOUR VOTE:</div>
+
+    <!-- HOST DASHBOARD SHOWING LIVE VOTES -->
+    <div id="host-tracker" class="host-dashboard hidden">
+      <p id="live-vote-count" class="vote-counter-text">Votes Cast: 0 / 0</p>
+    </div>
+
+    <div id="voting-instruction" style="color: #aaa; font-size: 13px;">CAST YOUR VOTE:</div>
     <div id="players-list" class="vote-grid"></div>
     <button id="results-btn" class="btn btn-cyan hidden" onclick="showResults()" style="margin-top:25px;">Reveal Results 📊</button>
   </div>
@@ -316,6 +346,7 @@
         questions: questions,
         currentQIndex: 0,
         votes: votes,
+        votersCount: 0,
         status: "voting"
       }).then(() => {
         listenToRoom();
@@ -344,6 +375,8 @@
         const totalQ = data.questions.length;
         const currentIdx = data.currentQIndex;
         const currentQuestion = data.questions[currentIdx];
+        const totalPlayers = data.players.length;
+        const totalVotesCast = data.votersCount || 0;
 
         if (data.status === "voting") {
           document.getElementById("vote-screen").classList.remove("hidden");
@@ -353,6 +386,18 @@
 
           if (isHost) {
             document.getElementById("results-btn").classList.remove("hidden");
+            document.getElementById("host-tracker").classList.remove("hidden");
+            document.getElementById("live-vote-count").innerText = `Votes Cast: ${totalVotesCast} / ${totalPlayers}`;
+
+            const resBtn = document.getElementById("results-btn");
+            if (totalVotesCast >= totalPlayers && totalPlayers > 0) {
+              resBtn.className = "btn btn-gold";
+              resBtn.innerText = "All Votes In! Reveal Results 📊";
+            } else {
+              resBtn.className = "btn btn-cyan";
+              resBtn.innerText = "Reveal Results 📊";
+            }
+
             if (document.getElementById("qrcode").innerHTML === "") {
               document.getElementById("qr-container").classList.remove("hidden");
               const joinUrl = window.location.origin + window.location.pathname + "?room=" + currentRoomCode;
@@ -360,10 +405,16 @@
             }
           }
 
+          const votedKey = "voted_" + currentRoomCode + "_q" + currentIdx;
+          const hasVoted = localStorage.getItem(votedKey);
+
           const list = document.getElementById("players-list");
           list.innerHTML = "";
           data.players.forEach(p => {
-            list.innerHTML += `<button class="vote-btn" onclick="castVote('${p}', '${currentIdx}')">${p}</button>`;
+            const isSelected = hasVoted === p;
+            const btnClass = isSelected ? "vote-btn selected" : "vote-btn";
+            const btnText = isSelected ? `${p} ✓ Voted` : p;
+            list.innerHTML += `<button class="${btnClass}" onclick="castVote('${p}', '${currentIdx}')">${btnText}</button>`;
           });
         }
 
@@ -388,7 +439,6 @@
           document.getElementById("tally-display").innerHTML = tallyHtml;
           document.getElementById("loser-name").innerText = loser;
 
-          // Trigger Confetti Celebration for the winner/shot-taker
           confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
         }
       });
@@ -396,18 +446,24 @@
 
     window.castVote = function(name, qIndex) {
       const votedKey = "voted_" + currentRoomCode + "_q" + qIndex;
-      if (localStorage.getItem(votedKey)) return alert("Vote already registered!");
-      
-      onValue(ref(db, `rooms/${currentRoomCode}/votes/${name}`), (snapshot) => {
-        const currentVotes = snapshot.val() || 0;
+      if (localStorage.getItem(votedKey)) return; 
+
+      localStorage.setItem(votedKey, name);
+
+      onValue(ref(db, `rooms/${currentRoomCode}`), (snapshot) => {
+        const data = snapshot.val();
+        if (!data) return;
+
+        const currentVotes = (data.votes && data.votes[name]) ? data.votes[name] : 0;
+        const newVotersCount = (data.votersCount || 0) + 1;
+
         update(ref(db, `rooms/${currentRoomCode}/votes`), { [name]: currentVotes + 1 });
-        localStorage.setItem(votedKey, "true");
-        alert(`Vote locked in for ${name}!`);
+        update(ref(db, `rooms/${currentRoomCode}`), { votersCount: newVotersCount });
       }, { onlyOnce: true });
     };
 
     window.showResults = function() {
-      if (!isHost) return alert("Only host can reveal!");
+      if (!isHost) return;
       update(ref(db, "rooms/" + currentRoomCode), { status: "results" });
     };
 
@@ -429,6 +485,7 @@
         update(ref(db, "rooms/" + currentRoomCode), {
           currentQIndex: nextIndex,
           votes: resetVotes,
+          votersCount: 0,
           status: "voting"
         });
       }, { onlyOnce: true });
