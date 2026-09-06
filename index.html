@@ -3,63 +3,436 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Most Likely To 🥃</title>
+  <title>Who's Most Likely To? 🥃</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Canvas Confetti Library for Game Show Victory Effect -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+  
   <style>
-    :root { --neon: #ff0055; --bg: #0f0c20; }
-    body { font-family: -apple-system, sans-serif; background: var(--bg); color: #fff; padding: 20px; text-align: center; }
-    h1 { color: var(--neon); text-transform: uppercase; margin-bottom: 5px; }
-    .card { background: #1c1836; padding: 20px; border-radius: 16px; margin: 15px 0; border: 1px solid #332d59; }
-    input, textarea, button { width: 100%; padding: 14px; margin: 8px 0; border-radius: 10px; border: none; font-size: 16px; box-sizing: border-box; }
-    input, textarea { background: #2a244d; color: #fff; text-align: center; font-family: inherit; }
-    textarea { height: 100px; text-align: left; }
-    button { background: var(--neon); color: #fff; font-weight: bold; cursor: pointer; }
-    .vote-btn { background: #2a244d; border: 2px solid var(--neon); color: #fff; font-size: 18px; }
-    .vote-btn:active { background: var(--neon); }
-    .hidden { display: none; }
-    .loser-box { background: #ff0055; padding: 20px; border-radius: 12px; font-size: 22px; font-weight: bold; margin-top: 15px; }
-    #qrcode img { margin: 15px auto; border: 8px solid white; border-radius: 8px; }
-    .room-tag { background: #2a244d; padding: 8px 15px; border-radius: 20px; font-size: 14px; color: #00d2d3; display: inline-block; margin-bottom: 10px; }
+    :root {
+      --neon-pink: #ff007f;
+      --neon-cyan: #00f3ff;
+      --neon-gold: #ffb700;
+      --neon-purple: #7928ca;
+      --bg-dark: #0a0612;
+      --card-bg: rgba(23, 15, 38, 0.85);
+    }
+
+    * { box-sizing: border-box; font-family: 'Outfit', -apple-system, sans-serif; }
+
+    body {
+      background: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 20% 20%, rgba(255, 0, 127, 0.15) 0%, transparent 40%),
+        radial-gradient(circle at 80% 80%, rgba(0, 243, 255, 0.15) 0%, transparent 40%);
+      color: #fff;
+      padding: 15px;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    .header-title {
+      font-size: 28px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      background: linear-gradient(135deg, var(--neon-cyan), var(--neon-pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin: 10px 0 5px 0;
+      text-shadow: 0 0 20px rgba(0,243,255,0.3);
+    }
+
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      width: 100%;
+      max-width: 420px;
+      padding: 24px 20px;
+      border-radius: 24px;
+      margin: 10px 0;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      text-align: center;
+    }
+
+    input, textarea {
+      width: 100%;
+      padding: 16px;
+      margin: 10px 0;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(10, 6, 18, 0.6);
+      color: #fff;
+      font-size: 16px;
+      text-align: center;
+      outline: none;
+      transition: all 0.3s;
+    }
+
+    textarea { height: 110px; text-align: left; font-size: 14px; }
+
+    input:focus, textarea:focus {
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 15px rgba(0, 243, 255, 0.3);
+    }
+
+    /* Game Show Buttons */
+    .btn {
+      width: 100%;
+      padding: 16px;
+      margin: 10px 0;
+      border-radius: 14px;
+      border: none;
+      font-size: 18px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--neon-pink), var(--neon-purple));
+      color: #fff;
+      box-shadow: 0 8px 25px rgba(255, 0, 127, 0.4);
+    }
+
+    .btn-cyan {
+      background: linear-gradient(135deg, var(--neon-cyan), #0081ff);
+      color: #000;
+      box-shadow: 0 8px 25px rgba(0, 243, 255, 0.4);
+    }
+
+    .btn:active { transform: scale(0.96); }
+
+    /* Player Voting Buttons */
+    .vote-grid { display: grid; gap: 10px; margin-top: 15px; }
+
+    .vote-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1.5px solid rgba(255, 0, 127, 0.4);
+      color: #fff;
+      padding: 16px;
+      border-radius: 14px;
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .vote-btn:active {
+      background: var(--neon-pink);
+      border-color: var(--neon-pink);
+      box-shadow: 0 0 20px var(--neon-pink);
+    }
+
+    .room-badge {
+      background: rgba(0, 243, 255, 0.1);
+      border: 1px solid var(--neon-cyan);
+      color: var(--neon-cyan);
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      display: inline-block;
+      margin-bottom: 10px;
+    }
+
+    .q-tracker {
+      color: var(--neon-gold);
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 13px;
+      letter-spacing: 2px;
+    }
+
+    .question-text {
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.3;
+      margin: 10px 0 20px 0;
+      color: #fff;
+    }
+
+    /* Results Winner Stage */
+    .loser-stage {
+      background: linear-gradient(135deg, rgba(255, 0, 127, 0.2), rgba(255, 183, 0, 0.2));
+      border: 2px solid var(--neon-gold);
+      border-radius: 18px;
+      padding: 20px;
+      margin-top: 20px;
+      animation: pulseStage 1.5s infinite alternate;
+    }
+
+    @keyframes pulseStage {
+      from { box-shadow: 0 0 15px rgba(255, 183, 0, 0.2); }
+      to { box-shadow: 0 0 30px rgba(255, 183, 0, 0.6); }
+    }
+
+    .loser-title {
+      color: var(--neon-gold);
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      font-weight: 700;
+    }
+
+    .loser-name {
+      font-size: 32px;
+      font-weight: 900;
+      color: #fff;
+      margin: 5px 0;
+      text-shadow: 0 0 10px rgba(255,255,255,0.5);
+    }
+
+    .tally-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+      margin: 6px 0;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    #qrcode img { margin: 15px auto; border: 6px solid #fff; border-radius: 12px; }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
 
-  <h1>Most Likely To 🥃</h1>
-  <div id="room-display" class="room-tag hidden"></div>
+  <div class="header-title">Most Likely To 🥃</div>
+  <div id="room-display" class="room-badge hidden"></div>
 
+  <!-- ENTRY SCREEN -->
   <div id="entry-screen" class="card">
-    <h3>Join or Host</h3>
+    <h2 style="margin-top:0">Party Game Studio</h2>
     <input type="text" id="join-code-input" placeholder="Enter 4-Digit Room Code" maxlength="4">
-    <button onclick="joinRoom()" style="background: #00d2d3; color: #000;">Join Game</button>
-    <hr style="border: 0.5px solid #332d59; margin: 20px 0;">
-    <button onclick="showHostSetup()">Create New Game (Host)</button>
+    <button class="btn btn-cyan" onclick="joinRoom()">Join Game</button>
+    <div style="margin: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.1);"></div>
+    <button class="btn btn-primary" onclick="showHostSetup()">Host New Game</button>
   </div>
 
+  <!-- HOST SETUP SCREEN -->
   <div id="setup-screen" class="card hidden">
-    <h3>Host Setup</h3>
+    <h2>Host Control Center</h2>
     <input type="text" id="player-names" placeholder="Player Names (e.g. Sam, Alex, Maya)">
-    <p style="color: #aaa; margin: 10px 0 0 0; font-size: 14px;">Enter Questions (One per line):</p>
-    <textarea id="game-questions" placeholder="Most likely to lose phone?&#10;Most likely to end up in jail?&#10;Most likely to cry at a movie?"></textarea>
-    <button onclick="createRoom()">Start Game & Show QR</button>
+    <p style="color: #aaa; margin: 10px 0 0 0; font-size: 13px;">Paste Questions List Below:</p>
+    <textarea id="game-questions" placeholder="Paste your questions here..." oninput="updateCount()"></textarea>
+    <div id="question-count" style="color: var(--neon-cyan); font-weight: 700; font-size: 14px; margin-bottom: 10px;">0 Questions Detected</div>
+    <button class="btn btn-primary" onclick="createRoom()">Launch Game & Show QR</button>
   </div>
 
+  <!-- VOTING SCREEN -->
   <div id="vote-screen" class="card hidden">
     <div id="qr-container" class="hidden">
-      <p style="margin: 0; color: #aaa;">Scan to Join Game:</p>
+      <p style="margin: 0; color: #aaa; font-size: 12px;">SCAN TO JOIN STAGE:</p>
       <div id="qrcode"></div>
     </div>
-    <h2 id="display-question"></h2>
-    <p style="color: #aaa;">Tap a name to vote:</p>
-    <div id="players-list"></div>
-    <button id="results-btn" onclick="showResults()" style="margin-top: 20px; background: #00d2d3; color: #000;" class="hidden">Reveal Results (Host Only)</button>
+    <div id="q-tracker" class="q-tracker"></div>
+    <div id="display-question" class="question-text"></div>
+    <div style="color: #aaa; font-size: 13px;">CAST YOUR VOTE:</div>
+    <div id="players-list" class="vote-grid"></div>
+    <button id="results-btn" class="btn btn-cyan hidden" onclick="showResults()" style="margin-top:25px;">Reveal Results 📊</button>
   </div>
 
+  <!-- RESULTS SCREEN -->
   <div id="result-screen" class="card hidden">
-    <h2>The Verdict 📊</h2>
-    <div id="tally-display"></div>
-    <div id="loser-display" class="loser-box"></div>
-    <button id="next-btn" onclick="nextQuestion()" style="margin-top:20px; background: #6c5ce7;" class="hidden">Next Question (Host Only)</button>
+    <div class="q-tracker">THE FINAL TALLY</div>
+    <div id="tally-display" style="margin-top: 15px;"></div>
+    
+    <div class="loser-stage">
+      <div class="loser-title">Takes The Shot 🥃</div>
+      <div id="loser-name" class="loser-name"></div>
+    </div>
+
+    <button id="next-btn" class="btn btn-primary hidden" onclick="nextQuestion()" style="margin-top:25px;">Next Question ➔</button>
   </div>
 
   <script type="module">
-    import { initializeApp } from
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    const firebaseConfig = { databaseURL: "https://who-is-the-most-likely-default-rtdb.firebaseio.com/" };
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    let currentRoomCode = "";
+    let isHost = false;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlRoom = urlParams.get('room');
+    if (urlRoom) {
+      document.getElementById('join-code-input').value = urlRoom;
+      setTimeout(joinRoom, 500);
+    }
+
+    function parseQuestions(rawText) {
+      if (!rawText) return [];
+      return rawText
+        .split(/\r?\n|\r|\? /)
+        .map(q => q.trim())
+        .map(q => (q.length > 0 && !q.endsWith('?') && !q.endsWith('.')) ? q + '?' : q)
+        .filter(q => q.length > 3);
+    }
+
+    window.updateCount = function() {
+      const raw = document.getElementById("game-questions").value;
+      const parsed = parseQuestions(raw);
+      document.getElementById("question-count").innerText = `${parsed.length} Questions Detected`;
+    };
+
+    window.showHostSetup = function() {
+      document.getElementById("entry-screen").classList.add("hidden");
+      document.getElementById("setup-screen").classList.remove("hidden");
+    };
+
+    window.createRoom = function() {
+      const names = document.getElementById("player-names").value.split(",").map(n => n.trim()).filter(n => n);
+      const rawQuestions = document.getElementById("game-questions").value;
+      const questions = parseQuestions(rawQuestions);
+
+      if (!names.length) return alert("Enter player names!");
+      if (!questions.length) return alert("Paste at least one question!");
+
+      currentRoomCode = Math.floor(1000 + Math.random() * 9000).toString();
+      isHost = true;
+
+      let votes = {};
+      names.forEach(n => votes[n] = 0);
+
+      const roomRef = ref(db, "rooms/" + currentRoomCode);
+      set(roomRef, {
+        players: names,
+        questions: questions,
+        currentQIndex: 0,
+        votes: votes,
+        status: "voting"
+      }).then(() => {
+        listenToRoom();
+      });
+    };
+
+    window.joinRoom = function() {
+      const code = document.getElementById("join-code-input").value.trim();
+      if (!code) return alert("Enter a room code!");
+      currentRoomCode = code;
+      listenToRoom();
+    };
+
+    function listenToRoom() {
+      const roomRef = ref(db, "rooms/" + currentRoomCode);
+      
+      onValue(roomRef, (snapshot) => {
+        const data = snapshot.val();
+        if (!data) return alert("Room not found!");
+
+        document.getElementById("room-display").innerText = "ROOM: " + currentRoomCode;
+        document.getElementById("room-display").classList.remove("hidden");
+        document.getElementById("entry-screen").classList.add("hidden");
+        document.getElementById("setup-screen").classList.add("hidden");
+
+        const totalQ = data.questions.length;
+        const currentIdx = data.currentQIndex;
+        const currentQuestion = data.questions[currentIdx];
+
+        if (data.status === "voting") {
+          document.getElementById("vote-screen").classList.remove("hidden");
+          document.getElementById("result-screen").classList.add("hidden");
+          document.getElementById("q-tracker").innerText = `QUESTION ${currentIdx + 1} OF ${totalQ}`;
+          document.getElementById("display-question").innerText = currentQuestion;
+
+          if (isHost) {
+            document.getElementById("results-btn").classList.remove("hidden");
+            if (document.getElementById("qrcode").innerHTML === "") {
+              document.getElementById("qr-container").classList.remove("hidden");
+              const joinUrl = window.location.origin + window.location.pathname + "?room=" + currentRoomCode;
+              new QRCode(document.getElementById("qrcode"), { text: joinUrl, width: 130, height: 130 });
+            }
+          }
+
+          const list = document.getElementById("players-list");
+          list.innerHTML = "";
+          data.players.forEach(p => {
+            list.innerHTML += `<button class="vote-btn" onclick="castVote('${p}', '${currentIdx}')">${p}</button>`;
+          });
+        }
+
+        if (data.status === "results") {
+          document.getElementById("vote-screen").classList.add("hidden");
+          document.getElementById("result-screen").classList.remove("hidden");
+
+          if (isHost) document.getElementById("next-btn").classList.remove("hidden");
+
+          let tallyHtml = "";
+          let maxVotes = -1;
+          let loser = "";
+
+          for (let [player, count] of Object.entries(data.votes || {})) {
+            tallyHtml += `<div class="tally-row"><span>${player}</span><span style="color:var(--neon-cyan)">${count} Votes</span></div>`;
+            if (count > maxVotes) {
+              maxVotes = count;
+              loser = player;
+            }
+          }
+
+          document.getElementById("tally-display").innerHTML = tallyHtml;
+          document.getElementById("loser-name").innerText = loser;
+
+          // Trigger Confetti Celebration for the winner/shot-taker
+          confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        }
+      });
+    }
+
+    window.castVote = function(name, qIndex) {
+      const votedKey = "voted_" + currentRoomCode + "_q" + qIndex;
+      if (localStorage.getItem(votedKey)) return alert("Vote already registered!");
+      
+      onValue(ref(db, `rooms/${currentRoomCode}/votes/${name}`), (snapshot) => {
+        const currentVotes = snapshot.val() || 0;
+        update(ref(db, `rooms/${currentRoomCode}/votes`), { [name]: currentVotes + 1 });
+        localStorage.setItem(votedKey, "true");
+        alert(`Vote locked in for ${name}!`);
+      }, { onlyOnce: true });
+    };
+
+    window.showResults = function() {
+      if (!isHost) return alert("Only host can reveal!");
+      update(ref(db, "rooms/" + currentRoomCode), { status: "results" });
+    };
+
+    window.nextQuestion = function() {
+      if (!isHost) return;
+
+      onValue(ref(db, "rooms/" + currentRoomCode), (snapshot) => {
+        const data = snapshot.val();
+        const nextIndex = data.currentQIndex + 1;
+
+        if (nextIndex >= data.questions.length) {
+          alert("Party Game Over! 🎉");
+          return;
+        }
+
+        let resetVotes = {};
+        data.players.forEach(p => resetVotes[p] = 0);
+
+        update(ref(db, "rooms/" + currentRoomCode), {
+          currentQIndex: nextIndex,
+          votes: resetVotes,
+          status: "voting"
+        });
+      }, { onlyOnce: true });
+    };
+  </script>
+</body>
+</html>
