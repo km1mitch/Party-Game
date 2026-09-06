@@ -111,12 +111,6 @@
       background: linear-gradient(135deg, var(--neon-gold), #ff5500);
       color: #000;
       box-shadow: 0 8px 25px rgba(255, 183, 0, 0.6);
-      animation: pulseGold 1s infinite alternate;
-    }
-
-    @keyframes pulseGold {
-      from { transform: scale(0.98); }
-      to { transform: scale(1.03); }
     }
 
     .btn:active { transform: scale(0.96); }
@@ -142,6 +136,12 @@
       box-shadow: 0 0 20px rgba(0, 184, 148, 0.6);
     }
 
+    .vote-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      border-color: #555;
+    }
+
     .room-badge {
       background: rgba(0, 243, 255, 0.1);
       border: 1px solid var(--neon-cyan);
@@ -164,7 +164,7 @@
     }
 
     .timer-ring {
-      font-size: 32px;
+      font-size: 36px;
       font-weight: 900;
       color: var(--neon-pink);
       margin: 10px 0;
@@ -290,7 +290,7 @@
       <div id="qrcode"></div>
     </div>
     <div id="q-tracker" class="q-tracker"></div>
-    <div id="timer-display" class="timer-ring">10</div>
+    <div id="timer-display" class="timer-ring">READY</div>
     <div id="display-question" class="question-text"></div>
 
     <!-- HOST STATUS DASHBOARD -->
@@ -299,9 +299,12 @@
       <div id="voters-list" class="voters-grid"></div>
     </div>
 
-    <div id="voting-instruction" style="color: #aaa; font-size: 13px;">TAP A NAME TO VOTE (CAN CHANGE ANYTIME):</div>
+    <div id="voting-instruction" style="color: #aaa; font-size: 13px;">TAP A NAME TO VOTE:</div>
     <div id="players-list" class="vote-grid"></div>
-    <button id="results-btn" class="btn btn-cyan hidden" onclick="triggerResults()" style="margin-top:25px;">Reveal Results 📊</button>
+    
+    <!-- HOST CONTROLS -->
+    <button id="start-timer-btn" class="btn btn-gold hidden" onclick="startVotingTimer()" style="margin-top:20px;">Start 10s Timer ⏱️</button>
+    <button id="results-btn" class="btn btn-cyan hidden" onclick="triggerResults()" style="margin-top:10px;">Reveal Results 📊</button>
   </div>
 
   <!-- RESULTS SCREEN -->
@@ -339,7 +342,7 @@
     let localPlayerName = "";
     let timerInterval = null;
 
-    // Web Audio API Synthesizer for SFX
+    // Web Audio Synthesizer SFX
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function playTone(freq, duration, type="sine") {
       try {
@@ -414,11 +417,11 @@
         roundVotes: {},
         voters: {},
         grandTotals: grandTotals,
-        timer: 10,
+        timer: "READY",
+        timerRunning: false,
         status: "voting"
       }).then(() => {
         listenToRoom();
-        startHostTimer();
       });
     };
 
@@ -433,10 +436,12 @@
       listenToRoom();
     };
 
-    function startHostTimer() {
+    window.startVotingTimer = function() {
+      if (!isHost) return;
       if (timerInterval) clearInterval(timerInterval);
+
       let timeLeft = 10;
-      update(ref(db, "rooms/" + currentRoomCode), { timer: timeLeft });
+      update(ref(db, "rooms/" + currentRoomCode), { timer: timeLeft, timerRunning: true });
 
       timerInterval = setInterval(() => {
         timeLeft--;
@@ -444,10 +449,10 @@
           update(ref(db, "rooms/" + currentRoomCode), { timer: timeLeft });
         } else {
           clearInterval(timerInterval);
-          triggerResults();
+          update(ref(db, "rooms/" + currentRoomCode), { timer: "TIME UP", timerRunning: false });
         }
       }, 1000);
-    }
+    };
 
     function listenToRoom() {
       const roomRef = ref(db, "rooms/" + currentRoomCode);
@@ -473,15 +478,18 @@
           document.getElementById("q-tracker").innerText = `QUESTION ${currentIdx + 1} OF ${totalQ}`;
           document.getElementById("display-question").innerText = currentQuestion;
 
-          // Sync 10s Timer
+          // Sync Timer Visuals and Audio
           const timerBox = document.getElementById("timer-display");
-          if (timerBox.innerText !== String(data.timer)) {
-            timerBox.innerText = data.timer;
-            if (data.timer > 0 && data.timer <= 5) sfxTick();
-            if (data.timer === 0) sfxBuzzer();
+          const previousVal = timerBox.innerText;
+          timerBox.innerText = data.timer;
+
+          if (data.timer !== previousVal) {
+            if (typeof data.timer === "number" && data.timer > 0 && data.timer <= 5) sfxTick();
+            if (data.timer === "TIME UP") sfxBuzzer();
           }
 
           if (isHost) {
+            document.getElementById("start-timer-btn").classList.remove("hidden");
             document.getElementById("results-btn").classList.remove("hidden");
             document.getElementById("host-tracker").classList.remove("hidden");
 
@@ -504,16 +512,18 @@
             }
           }
 
-          // Render Voting Grid with Changeable Votes
+          // Render Voting Buttons (Locked when timer expires)
           const list = document.getElementById("players-list");
           list.innerHTML = "";
           const myCurrentChoice = data.voters ? data.voters[localPlayerName] : null;
+          const isLocked = data.timer === "TIME UP";
 
           data.players.forEach(p => {
             const isSelected = myCurrentChoice === p;
             const btnClass = isSelected ? "vote-btn selected" : "vote-btn";
             const btnText = isSelected ? `${p} ✓` : p;
-            list.innerHTML += `<button class="${btnClass}" onclick="castVote('${p}')">${btnText}</button>`;
+            const disabledAttr = isLocked ? "disabled" : "";
+            list.innerHTML += `<button class="${btnClass}" ${disabledAttr} onclick="castVote('${p}')">${btnText}</button>`;
           });
         }
 
@@ -538,7 +548,6 @@
           let maxVotes = -1;
           let losers = [];
 
-          // Compute Tally
           for (let p of data.players) {
             const count = (data.roundVotes && data.roundVotes[p]) ? data.roundVotes[p] : 0;
             tallyHtml += `<div class="tally-row"><span>${p}</span><span style="color:var(--neon-cyan)">${count} Votes</span></div>`;
@@ -587,7 +596,7 @@
     window.castVote = function(targetName) {
       onValue(ref(db, `rooms/${currentRoomCode}`), (snapshot) => {
         const data = snapshot.val();
-        if (!data || data.status !== "voting") return;
+        if (!data || data.status !== "voting" || data.timer === "TIME UP") return;
 
         const previousVote = data.voters ? data.voters[localPlayerName] : null;
         if (previousVote === targetName) return; 
@@ -595,13 +604,11 @@
         let newRoundVotes = { ...(data.roundVotes || {}) };
         let newGrandTotals = { ...(data.grandTotals || {}) };
 
-        // Subtract previous choice if changing vote
         if (previousVote) {
           newRoundVotes[previousVote] = Math.max(0, (newRoundVotes[previousVote] || 1) - 1);
           newGrandTotals[previousVote] = Math.max(0, (newGrandTotals[previousVote] || 1) - 1);
         }
 
-        // Add new vote
         newRoundVotes[targetName] = (newRoundVotes[targetName] || 0) + 1;
         newGrandTotals[targetName] = (newGrandTotals[targetName] || 0) + 1;
 
@@ -633,10 +640,9 @@
           currentQIndex: nextIndex,
           roundVotes: {},
           voters: {},
-          timer: 10,
+          timer: "READY",
+          timerRunning: false,
           status: "voting"
-        }).then(() => {
-          startHostTimer();
         });
       }, { onlyOnce: true });
     };
