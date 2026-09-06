@@ -115,6 +115,39 @@
 
     .btn:active { transform: scale(0.96); }
 
+    /* Powerups Grid */
+    .powerup-container {
+      display: flex;
+      gap: 10px;
+      margin: 15px 0 5px 0;
+    }
+
+    .powerup-btn {
+      flex: 1;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .powerup-btn.active {
+      background: linear-gradient(135deg, var(--neon-gold), #ff5500) !important;
+      color: #000 !important;
+      border-color: var(--neon-gold) !important;
+      box-shadow: 0 0 15px rgba(255, 183, 0, 0.6);
+    }
+
+    .powerup-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      border-color: #444;
+    }
+
     .vote-grid { display: grid; gap: 10px; margin-top: 15px; }
 
     .vote-btn {
@@ -299,7 +332,14 @@
       <div id="voters-list" class="voters-grid"></div>
     </div>
 
-    <div id="voting-instruction" style="color: #aaa; font-size: 13px;">TAP A NAME TO VOTE:</div>
+    <!-- WILDCARD POWERUPS -->
+    <div style="color: #aaa; font-size: 12px; font-weight:700;">1-TIME WILDCARDS:</div>
+    <div class="powerup-container">
+      <button id="shield-btn" class="powerup-btn" onclick="togglePowerup('shield')">🛡️ Shield</button>
+      <button id="reverse-btn" class="powerup-btn" onclick="togglePowerup('reverse')">🔄 Uno Reverse</button>
+    </div>
+
+    <div id="voting-instruction" style="color: #aaa; font-size: 13px; margin-top:10px;">TAP A NAME TO VOTE:</div>
     <div id="players-list" class="vote-grid"></div>
     
     <!-- HOST CONTROLS -->
@@ -341,6 +381,9 @@
     let isHost = false;
     let localPlayerName = "";
     let timerInterval = null;
+
+    let shieldUsed = false;
+    let reverseUsed = false;
 
     // Web Audio Synthesizer SFX
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -416,6 +459,7 @@
         currentQIndex: 0,
         roundVotes: {},
         voters: {},
+        activePowerups: {},
         grandTotals: grandTotals,
         timer: "READY",
         timerRunning: false,
@@ -454,6 +498,27 @@
       }, 1000);
     };
 
+    window.togglePowerup = function(type) {
+      onValue(ref(db, `rooms/${currentRoomCode}`), (snapshot) => {
+        const data = snapshot.val();
+        if (!data || data.status !== "voting" || data.timer === "TIME UP") return;
+
+        const currentActive = (data.activePowerups && data.activePowerups[localPlayerName]) ? data.activePowerups[localPlayerName] : null;
+
+        if (type === 'shield') {
+          if (shieldUsed && currentActive !== 'shield') return alert("You already used your Shield tonight!");
+          const nextState = currentActive === 'shield' ? null : 'shield';
+          update(ref(db, `rooms/${currentRoomCode}/activePowerups`), { [localPlayerName]: nextState });
+        }
+
+        if (type === 'reverse') {
+          if (reverseUsed && currentActive !== 'reverse') return alert("You already used your Uno Reverse tonight!");
+          const nextState = currentActive === 'reverse' ? null : 'reverse';
+          update(ref(db, `rooms/${currentRoomCode}/activePowerups`), { [localPlayerName]: nextState });
+        }
+      }, { onlyOnce: true });
+    };
+
     function listenToRoom() {
       const roomRef = ref(db, "rooms/" + currentRoomCode);
       
@@ -478,7 +543,7 @@
           document.getElementById("q-tracker").innerText = `QUESTION ${currentIdx + 1} OF ${totalQ}`;
           document.getElementById("display-question").innerText = currentQuestion;
 
-          // Sync Timer Visuals and Audio
+          // Sync Timer
           const timerBox = document.getElementById("timer-display");
           const previousVal = timerBox.innerText;
           timerBox.innerText = data.timer;
@@ -488,20 +553,36 @@
             if (data.timer === "TIME UP") sfxBuzzer();
           }
 
+          // Powerup Buttons state
+          const myPowerup = data.activePowerups ? data.activePowerups[localPlayerName] : null;
+          const shieldBtn = document.getElementById("shield-btn");
+          const reverseBtn = document.getElementById("reverse-btn");
+
+          shieldBtn.className = myPowerup === 'shield' ? "powerup-btn active" : "powerup-btn";
+          reverseBtn.className = myPowerup === 'reverse' ? "powerup-btn active" : "powerup-btn";
+
+          if (shieldUsed && myPowerup !== 'shield') shieldBtn.disabled = true;
+          if (reverseUsed && myPowerup !== 'reverse') reverseBtn.disabled = true;
+
           if (isHost) {
             document.getElementById("start-timer-btn").classList.remove("hidden");
             document.getElementById("results-btn").classList.remove("hidden");
             document.getElementById("host-tracker").classList.remove("hidden");
 
-            // Live Voter Badges for Host
+            // Live Voter Tracker
             const votersList = document.getElementById("voters-list");
             votersList.innerHTML = "";
             const currentVoters = data.voters || {};
+            const currentPowers = data.activePowerups || {};
 
             data.players.forEach(p => {
               const hasVoted = currentVoters[p];
+              const pPower = currentPowers[p];
+              let badgeIcon = hasVoted ? "✓" : "...";
+              if (pPower === 'shield') badgeIcon += " 🛡️";
+              if (pPower === 'reverse') badgeIcon += " 🔄";
+
               const badgeClass = hasVoted ? "voter-badge done" : "voter-badge";
-              const badgeIcon = hasVoted ? "✓" : "...";
               votersList.innerHTML += `<div class="${badgeClass}">${p} ${badgeIcon}</div>`;
             });
 
@@ -512,7 +593,7 @@
             }
           }
 
-          // Render Voting Buttons (Locked when timer expires)
+          // Render Voting Buttons
           const list = document.getElementById("players-list");
           list.innerHTML = "";
           const myCurrentChoice = data.voters ? data.voters[localPlayerName] : null;
@@ -534,6 +615,11 @@
 
           document.getElementById("reveal-question-text").innerText = currentQuestion;
 
+          // Record if player consumed their wildcard powerup
+          const myPowerup = data.activePowerups ? data.activePowerups[localPlayerName] : null;
+          if (myPowerup === 'shield') shieldUsed = true;
+          if (myPowerup === 'reverse') reverseUsed = true;
+
           if (isHost) {
             const nextBtn = document.getElementById("next-btn");
             nextBtn.classList.remove("hidden");
@@ -545,33 +631,57 @@
           }
 
           let tallyHtml = "";
-          let maxVotes = -1;
-          let losers = [];
+          let sortedVotes = [];
 
           for (let p of data.players) {
             const count = (data.roundVotes && data.roundVotes[p]) ? data.roundVotes[p] : 0;
-            tallyHtml += `<div class="tally-row"><span>${p}</span><span style="color:var(--neon-cyan)">${count} Votes</span></div>`;
-            if (count > maxVotes) {
-              maxVotes = count;
-              losers = [p];
-            } else if (count === maxVotes && count > 0) {
-              losers.push(p);
-            }
+            const power = (data.activePowerups && data.activePowerups[p]) ? data.activePowerups[p] : null;
+            let pIcon = power === 'shield' ? " 🛡️" : power === 'reverse' ? " 🔄" : "";
+            
+            tallyHtml += `<div class="tally-row"><span>${p}${pIcon}</span><span style="color:var(--neon-cyan)">${count} Votes</span></div>`;
+            sortedVotes.push({ player: p, count: count, power: power });
           }
 
+          sortedVotes.sort((a,b) => b.count - a.count);
           document.getElementById("tally-display").innerHTML = tallyHtml;
 
-          if (maxVotes <= 0) {
+          const topWinner = sortedVotes[0];
+
+          if (!topWinner || topWinner.count <= 0) {
             document.getElementById("loser-header").innerText = "NO VOTES CAST!";
             document.getElementById("loser-name").innerText = "Nobody Drinks";
-          } else if (losers.length > 1) {
-            document.getElementById("loser-header").innerText = "IT'S A TIE! BOTH TAKE A SHOT 🥃";
-            document.getElementById("loser-name").innerText = losers.join(" & ");
+          } 
+          // UNO REVERSE ACTIVATED BY TOP VOTED PLAYER
+          else if (topWinner.power === 'reverse') {
+            document.getElementById("loser-header").innerText = "🔄 UNO REVERSE ACTIVATED! VOTERS DRINK 🥃";
+            
+            let votersWhoVotedTop = [];
+            for (let [voter, target] of Object.entries(data.voters || {})) {
+              if (target === topWinner.player) votersWhoVotedTop.push(voter);
+            }
+
+            document.getElementById("loser-name").innerText = votersWhoVotedTop.length ? votersWhoVotedTop.join(" & ") : "Voters!";
             sfxFanfare();
             confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-          } else {
-            document.getElementById("loser-header").innerText = "Takes The Shot 🥃";
-            document.getElementById("loser-name").innerText = losers[0];
+          } 
+          // SHIELD ACTIVATED BY TOP VOTED PLAYER
+          else if (topWinner.power === 'shield') {
+            document.getElementById("loser-header").innerText = "🛡️ SHIELD ACTIVATED! 2ND PLACE TAKES SHOT 🥃";
+            const secondPlace = sortedVotes[1] ? sortedVotes[1].player : "Nobody";
+            document.getElementById("loser-name").innerText = `${secondPlace} (Shielded: ${topWinner.player})`;
+            sfxFanfare();
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+          } 
+          // NORMAL RESULT / TIE
+          else {
+            let losers = sortedVotes.filter(v => v.count === topWinner.count).map(v => v.player);
+            if (losers.length > 1) {
+              document.getElementById("loser-header").innerText = "IT'S A TIE! BOTH TAKE A SHOT 🥃";
+              document.getElementById("loser-name").innerText = losers.join(" & ");
+            } else {
+              document.getElementById("loser-header").innerText = "Takes The Shot 🥃";
+              document.getElementById("loser-name").innerText = losers[0];
+            }
             sfxFanfare();
             confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
           }
@@ -640,6 +750,7 @@
           currentQIndex: nextIndex,
           roundVotes: {},
           voters: {},
+          activePowerups: {},
           timer: "READY",
           timerRunning: false,
           status: "voting"
