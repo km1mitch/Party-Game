@@ -209,11 +209,12 @@
     }
 
     .loser-name {
-      font-size: 32px;
+      font-size: 28px;
       font-weight: 900;
       color: #fff;
       margin: 5px 0;
       text-shadow: 0 0 10px rgba(255,255,255,0.5);
+      line-height: 1.2;
     }
 
     .tally-row {
@@ -265,7 +266,6 @@
     <div id="q-tracker" class="q-tracker"></div>
     <div id="display-question" class="question-text"></div>
 
-    <!-- HOST DASHBOARD SHOWING LIVE VOTES -->
     <div id="host-tracker" class="host-dashboard hidden">
       <p id="live-vote-count" class="vote-counter-text">Votes Cast: 0 / 0</p>
     </div>
@@ -281,7 +281,7 @@
     <div id="tally-display" style="margin-top: 15px;"></div>
     
     <div class="loser-stage">
-      <div class="loser-title">Takes The Shot 🥃</div>
+      <div id="loser-header" class="loser-title">Takes The Shot 🥃</div>
       <div id="loser-name" class="loser-name"></div>
     </div>
 
@@ -426,18 +426,28 @@
 
           let tallyHtml = "";
           let maxVotes = -1;
-          let loser = "";
+          let losers = [];
 
+          // Determine highest vote count and all players tied for top spot
           for (let [player, count] of Object.entries(data.votes || {})) {
             tallyHtml += `<div class="tally-row"><span>${player}</span><span style="color:var(--neon-cyan)">${count} Votes</span></div>`;
             if (count > maxVotes) {
               maxVotes = count;
-              loser = player;
+              losers = [player];
+            } else if (count === maxVotes && count > 0) {
+              losers.push(player);
             }
           }
 
           document.getElementById("tally-display").innerHTML = tallyHtml;
-          document.getElementById("loser-name").innerText = loser;
+
+          if (losers.length > 1) {
+            document.getElementById("loser-header").innerText = "IT'S A TIE! BOTH TAKE A SHOT 🥃";
+            document.getElementById("loser-name").innerText = losers.join(" & ");
+          } else {
+            document.getElementById("loser-header").innerText = "Takes The Shot 🥃";
+            document.getElementById("loser-name").innerText = losers[0] || "Nobody";
+          }
 
           confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
         }
