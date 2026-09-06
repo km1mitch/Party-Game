@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Most Likely To 🥃</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    :root { --neon: #ff0055; --bg: #0f0c20; }
+    body { font-family: -apple-system, sans-serif; background: var(--bg); color: #fff; padding: 20px; text-align: center; }
+    h1 { color: var(--neon); text-transform: uppercase; margin-bottom: 5px; }
+    .card { background: #1c1836; padding: 20px; border-radius: 16px; margin: 15px 0; border: 1px solid #332d59; }
+    input, button { width: 100%; padding: 14px; margin: 8px 0; border-radius: 10px; border: none; font-size: 16px; box-sizing: border-box; }
+    input { background: #2a244d; color: #fff; text-align: center; }
+    button { background: var(--neon); color: #fff; font-weight: bold; cursor: pointer; }
+    .vote-btn { background: #2a244d; border: 2px solid var(--neon); color: #fff; font-size: 18px; }
+    .vote-btn:active { background: var(--neon); }
+    .hidden { display: none; }
+    .loser-box { background: #ff0055; padding: 20px; border-radius: 12px; font-size: 22px; font-weight: bold; margin-top: 15px; }
+    #qrcode img { margin: 15px auto; border: 8px solid white; border-radius: 8px; }
+    .room-tag { background: #2a244d; padding: 8px 15px; border-radius: 20px; font-size: 14px; color: #00d2d3; display: inline-block; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+  <h1>Most Likely To 🥃</h1>
+  <div id="room-display" class="room-tag hidden"></div>
+
+  <!-- ENTRY SCREEN -->
+  <div id="entry-screen" class="card">
+    <h3>Join or Host</h3>
+    <input type="text" id="join-code-input" placeholder="Enter 4-Digit Room Code" maxlength="4">
+    <button onclick="joinRoom()" style="background: #00d2d3; color: #000;">Join Game</button>
+    <hr style="border: 0.5px solid #332d59; margin: 20px 0;">
+    <button onclick="showHostSetup()">Create New Game (Host)</button>
+  </div>
+
+  <!-- HOST SETUP SCREEN -->
+  <div id="setup-screen" class="card hidden">
+    <h3>Host Setup</h3>
+    <input type="text" id="player-names" placeholder="Player Names (e.g. Sam, Alex, Maya)">
+    <input type="text" id="game-question" placeholder="Question (e.g. Most likely to lose phone?)">
+    <button onclick="createRoom()">Start Round & Show QR</button>
+  </div>
+
+  <!-- VOTING SCREEN -->
+  <div id="vote-screen" class="card hidden">
+    <div id="qr-container" class="hidden">
+      <p style="margin: 0; color: #aaa;">Scan to Join Game:</p>
+      <div id="qrcode"></div>
+    </div>
+    <h2 id="display-question"></h2>
+    <p style="color: #aaa;">Tap a name to vote:</p>
+    <div id="players-list"></div>
+    <button id="results-btn" onclick="showResults()" style="margin-top: 20px; background: #00d2d3; color: #000;">Reveal Results (Host Only)</button>
+  </div>
+
+  <!-- RESULTS SCREEN -->
+  <div id="result-screen" class="card hidden">
+    <h2>The Verdict 📊</h2>
+    <div id="tally-display"></div>
+    <div id="loser-display" class="loser-box"></div>
+    <button id="next-btn" onclick="nextQuestion()" style="margin-top:20px; background: #6c5ce7;" class="hidden">Next Question (Host Only)</button>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    const firebaseConfig = { databaseURL: "https://who-is-the-most-likely-default-rtdb.firebaseio.com/" };
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    let currentRoomCode = "";
+    let isHost = false;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlRoom = urlParams.get('room');
+    if (urlRoom) {
+      document.getElementById('join-code-input').value = urlRoom;
+      setTimeout(joinRoom, 500);
+    }
+
+    window.showHostSetup = function() {
+      document.getElementById("entry-screen").classList.add("hidden");
+      document.getElementById("setup-screen").classList.remove("hidden");
+    };
+
+    window.createRoom = function() {
+      const names = document.getElementById("player-names").value.split(",").map(n => n.trim()).filter(n => n);
+      const question = document.getElementById("game-question").value;
+      if (!names.length || !question) return alert("Enter names and a question!");
+
+      currentRoomCode = Math.floor(1000 + Math.random() * 9000).toString();
+      isHost = true;
+
+      let votes = {};
+      names.forEach(n => votes[n] = 0);
+
+      const roomRef = ref(db, "rooms/" + currentRoomCode);
+      set(roomRef, { question, players: names, votes, status: "voting" }).then(() => {
+        listenToRoom();
+      });
+    };
+
+    window.joinRoom = function() {
+      const code = document.getElementById("join-code-input").value.trim();
+      if (!code) return alert("Enter a room code!");
+      currentRoomCode = code;
+      listenToRoom();
+    };
+
+    function listenToRoom() {
+      const roomRef = ref(db, "rooms/" + currentRoomCode);
+      
+      onValue(roomRef, (snapshot) => {
+        const data = snapshot.val();
+        if (!data) return alert("Room not found! Check the code.");
+
+        document.getElementById("room-display").innerText = "Room Code: " + currentRoomCode;
+        document.getElementById("room-display").classList.remove("hidden");
+        document.getElementById("entry-screen").classList.add("hidden");
+        document.getElementById("setup-screen").classList.add("hidden");
+
+        if (data.status === "voting") {
+          document.getElementById("vote-screen").classList.remove("hidden");
+          document.getElementById("result-screen").classList.add("hidden");
+          document.getElementById("display-question").innerText = data.question;
+
+          if (isHost && document.getElementById("qrcode").innerHTML === "") {
+            document.getElementById("qr-container").classList.remove("hidden");
+            const joinUrl = window.location.origin + window.location.pathname + "?room=" + currentRoomCode;
+            new QRCode(document.getElementById("qrcode"), { text: joinUrl, width: 150, height: 150 });
+          }
+
+          const list = document.getElementById("players-list");
+          list.innerHTML = "";
+          data.players.forEach(p => {
+            list.innerHTML += `<button class="vote-btn" onclick="castVote('${p}')">${p}</button>`;
+          });
+        }
+
+        if (data.status === "results") {
+          document.getElementById("vote-screen").classList.add("hidden");
+          document.getElementById("result-screen").classList.remove("hidden");
+
+          if (isHost) document.getElementById("next-btn").classList.remove("hidden");
+
+          let tallyHtml = "";
+          let maxVotes = -1;
+          let loser = "";
+
+          for (let [player, count] of Object.entries(data.votes || {})) {
+            tallyHtml += `<p style="font-size: 18px;"><strong>${player}:</strong> ${count} votes</p>`;
+            if (count > maxVotes) {
+              maxVotes = count;
+              loser = player;
+            }
+          }
+
+          document.getElementById("tally-display").innerHTML = tallyHtml;
+          document.getElementById("loser-display").innerHTML = `${loser} takes the shot! 🥃`;
+        }
+      });
+    }
+
+    window.castVote = function(name) {
+      const votedKey = "voted_" + currentRoomCode + "_" + document.getElementById("display-question").innerText;
+      if (localStorage.getItem(votedKey)) return alert("You already voted this round!");
+      
+      onValue(ref(db, `rooms/${currentRoomCode}/votes/${name}`), (snapshot) => {
+        const currentVotes = snapshot.val() || 0;
+        update(ref(db, `rooms/${currentRoomCode}/votes`), { [name]: currentVotes + 1 });
+        localStorage.setItem(votedKey, "true");
+        alert(`Vote cast for ${name}!`);
+      }, { onlyOnce: true });
+    };
+
+    window.showResults = function() {
+      if (!isHost) return alert("Only the host can reveal results!");
+      update(ref(db, "rooms/" + currentRoomCode), { status: "results" });
+    };
+
+    window.nextQuestion = function() {
+      const newQuestion = prompt("Enter the next question:");
+      if (!newQuestion) return;
+
+      onValue(ref(db, "rooms/" + currentRoomCode), (snapshot) => {
+        const data = snapshot.val();
+        let newVotes = {};
+        data.players.forEach(p => newVotes[p] = 0);
+
+        set(ref(db, "rooms/" + currentRoomCode), {
+          players: data.players,
+          question: newQuestion,
+          votes: newVotes,
+          status: "voting"
+        });
+      }, { onlyOnce: true });
+    };
+  </script>
+</body>
+</html>
