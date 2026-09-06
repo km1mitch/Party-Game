@@ -309,7 +309,6 @@
   <div id="setup-screen" class="card hidden">
     <h2>Host Control Center</h2>
     <input type="text" id="host-name" placeholder="Host Player Name">
-    <input type="text" id="player-names" placeholder="Player Names (comma separated e.g. Sam, Alex, Maya)">
     <p style="color: #aaa; margin: 10px 0 0 0; font-size: 13px;">Paste Questions List Below:</p>
     <textarea id="game-questions" placeholder="Paste your questions here..." oninput="updateCount()"></textarea>
     <div id="question-count" style="color: var(--neon-cyan); font-weight: 700; font-size: 14px; margin-bottom: 10px;">0 Questions Detected</div>
@@ -436,25 +435,22 @@
 
     window.createRoom = function() {
       const hostName = document.getElementById("host-name").value.trim();
-      const rawNames = document.getElementById("player-names").value.split(",").map(n => n.trim()).filter(n => n);
       const rawQuestions = document.getElementById("game-questions").value;
       const questions = parseQuestions(rawQuestions);
 
       if (!hostName) return alert("Enter your name as host!");
-      if (!rawNames.length) return alert("Enter player names!");
       if (!questions.length) return alert("Paste at least one question!");
 
-      const names = Array.from(new Set([hostName, ...rawNames]));
       localPlayerName = hostName;
       currentRoomCode = Math.floor(1000 + Math.random() * 9000).toString();
       isHost = true;
 
       let grandTotals = {};
-      names.forEach(n => grandTotals[n] = 0);
+      grandTotals[hostName] = 0;
 
       const roomRef = ref(db, "rooms/" + currentRoomCode);
       set(roomRef, {
-        players: names,
+        players: [hostName],
         questions: questions,
         currentQIndex: 0,
         roundVotes: {},
@@ -477,7 +473,25 @@
       
       localPlayerName = name;
       currentRoomCode = code;
-      listenToRoom();
+
+      // Add joining player dynamically to the database player list
+      onValue(ref(db, `rooms/${code}`), (snapshot) => {
+        const data = snapshot.val();
+        if (!data) return alert("Room not found!");
+
+        let currentPlayers = data.players || [];
+        if (!currentPlayers.includes(name)) {
+          currentPlayers.push(name);
+          let grandTotals = data.grandTotals || {};
+          grandTotals[name] = 0;
+
+          update(ref(db, `rooms/${code}`), { 
+            players: currentPlayers,
+            grandTotals: grandTotals
+          });
+        }
+        listenToRoom();
+      }, { onlyOnce: true });
     };
 
     window.startVotingTimer = function() {
@@ -575,7 +589,7 @@
             const currentVoters = data.voters || {};
             const currentPowers = data.activePowerups || {};
 
-            data.players.forEach(p => {
+            (data.players || []).forEach(p => {
               const hasVoted = currentVoters[p];
               const pPower = currentPowers[p];
               let badgeIcon = hasVoted ? "✓" : "...";
@@ -593,13 +607,13 @@
             }
           }
 
-          // Render Voting Buttons
+          // Render Voting Buttons (Automatically populates from connected players)
           const list = document.getElementById("players-list");
           list.innerHTML = "";
           const myCurrentChoice = data.voters ? data.voters[localPlayerName] : null;
           const isLocked = data.timer === "TIME UP";
 
-          data.players.forEach(p => {
+          (data.players || []).forEach(p => {
             const isSelected = myCurrentChoice === p;
             const btnClass = isSelected ? "vote-btn selected" : "vote-btn";
             const btnText = isSelected ? `${p} ✓` : p;
@@ -615,7 +629,7 @@
 
           document.getElementById("reveal-question-text").innerText = currentQuestion;
 
-          // Record if player consumed their wildcard powerup
+          // Record if player consumed wildcard
           const myPowerup = data.activePowerups ? data.activePowerups[localPlayerName] : null;
           if (myPowerup === 'shield') shieldUsed = true;
           if (myPowerup === 'reverse') reverseUsed = true;
@@ -633,7 +647,7 @@
           let tallyHtml = "";
           let sortedVotes = [];
 
-          for (let p of data.players) {
+          for (let p of (data.players || [])) {
             const count = (data.roundVotes && data.roundVotes[p]) ? data.roundVotes[p] : 0;
             const power = (data.activePowerups && data.activePowerups[p]) ? data.activePowerups[p] : null;
             let pIcon = power === 'shield' ? " 🛡️" : power === 'reverse' ? " 🔄" : "";
@@ -651,7 +665,6 @@
             document.getElementById("loser-header").innerText = "NO VOTES CAST!";
             document.getElementById("loser-name").innerText = "Nobody Drinks";
           } 
-          // UNO REVERSE ACTIVATED BY TOP VOTED PLAYER
           else if (topWinner.power === 'reverse') {
             document.getElementById("loser-header").innerText = "🔄 UNO REVERSE ACTIVATED! VOTERS DRINK 🥃";
             
@@ -664,7 +677,6 @@
             sfxFanfare();
             confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
           } 
-          // SHIELD ACTIVATED BY TOP VOTED PLAYER
           else if (topWinner.power === 'shield') {
             document.getElementById("loser-header").innerText = "🛡️ SHIELD ACTIVATED! 2ND PLACE TAKES SHOT 🥃";
             const secondPlace = sortedVotes[1] ? sortedVotes[1].player : "Nobody";
@@ -672,7 +684,6 @@
             sfxFanfare();
             confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
           } 
-          // NORMAL RESULT / TIE
           else {
             let losers = sortedVotes.filter(v => v.count === topWinner.count).map(v => v.player);
             if (losers.length > 1) {
