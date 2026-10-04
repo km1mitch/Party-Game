@@ -115,7 +115,6 @@
 
     .btn:active { transform: scale(0.96); }
 
-    /* Powerups Grid */
     .powerup-container {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -344,7 +343,7 @@
     <!-- WILDCARD POWERUPS -->
     <div style="color: #aaa; font-size: 12px; font-weight:700;">1-TIME WILDCARDS:</div>
     <div class="powerup-container">
-      <button id="shield-btn" class="powerup-btn" onclick="togglePowerup('shield')">🛡️ Shield</button>
+      <button id="shield-btn" class="powerup-btn" onclick="togglePowerup('shield')">🛡️️ Shield</button>
       <button id="reverse-btn" class="powerup-btn" onclick="togglePowerup('reverse')">🔄 Reverse</button>
       <button id="double-btn" class="powerup-btn" onclick="togglePowerup('double')">✌️ Double</button>
       <button id="reveal-btn" class="powerup-btn" onclick="togglePowerup('reveal')">🔍 Reveal</button>
@@ -375,7 +374,7 @@
       <div id="loser-name" class="loser-name"></div>
     </div>
 
-    <button id="next-btn" class="btn btn-primary hidden" onclick="nextQuestion()" style="margin-top:25px;">Next Question ➔</button>
+    <button id="next-btn" class="btn btn-primary hidden" onclick="nextQuestion()" style="margin-top:25px; display:block;">Next Question ➔</button>
   </div>
 
   <!-- FINAL LEADERBOARD SCREEN -->
@@ -765,9 +764,7 @@
         let newGrandTotals = { ...(data.grandTotals || {}) };
 
         if (myPower === 'double') {
-          // Double Powerup allows up to 2 choices
           if (myCurrentChoices.length >= 2) {
-            // Reset previous two choices
             myCurrentChoices.forEach(c => {
               newRoundVotes[c] = Math.max(0, (newRoundVotes[c] || 1) - 1);
               newGrandTotals[c] = Math.max(0, (newGrandTotals[c] || 1) - 1);
@@ -781,7 +778,6 @@
           newGrandTotals[targetName] = (newGrandTotals[targetName] || 0) + 1;
 
         } else {
-          // Standard Single Vote
           if (myCurrentChoices.length > 0) {
             myCurrentChoices.forEach(c => {
               newRoundVotes[c] = Math.max(0, (newRoundVotes[c] || 1) - 1);
