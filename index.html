@@ -111,6 +111,12 @@
       background: linear-gradient(135deg, var(--neon-gold), #ff5500);
       color: #000;
       box-shadow: 0 8px 25px rgba(255, 183, 0, 0.6);
+      animation: pulseGold 1s infinite alternate;
+    }
+
+    @keyframes pulseGold {
+      from { transform: scale(0.98); }
+      to { transform: scale(1.02); }
     }
 
     .btn:active { transform: scale(0.96); }
@@ -343,7 +349,7 @@
     <!-- WILDCARD POWERUPS -->
     <div style="color: #aaa; font-size: 12px; font-weight:700;">1-TIME WILDCARDS:</div>
     <div class="powerup-container">
-      <button id="shield-btn" class="powerup-btn" onclick="togglePowerup('shield')">🛡️️ Shield</button>
+      <button id="shield-btn" class="powerup-btn" onclick="togglePowerup('shield')">🛡 Shield</button>
       <button id="reverse-btn" class="powerup-btn" onclick="togglePowerup('reverse')">🔄 Reverse</button>
       <button id="double-btn" class="powerup-btn" onclick="togglePowerup('double')">✌️ Double</button>
       <button id="reveal-btn" class="powerup-btn" onclick="togglePowerup('reveal')">🔍 Reveal</button>
@@ -560,14 +566,9 @@
         const currentQuestion = data.questions[currentIdx];
         const allPlayers = data.players || [];
 
-        // Check if all players have cast votes to trigger AUTO-REVEAL
         const currentVotersMap = data.voters || {};
         const activePowersMap = data.activePowerups || {};
         const votedPlayerCount = Object.keys(currentVotersMap).length;
-
-        if (data.status === "voting" && allPlayers.length > 0 && votedPlayerCount >= allPlayers.length) {
-          if (isHost) triggerResults();
-        }
 
         if (data.status === "voting") {
           document.getElementById("vote-screen").classList.remove("hidden");
@@ -605,6 +606,15 @@
             document.getElementById("start-timer-btn").classList.remove("hidden");
             document.getElementById("results-btn").classList.remove("hidden");
             document.getElementById("host-tracker").classList.remove("hidden");
+
+            const resBtn = document.getElementById("results-btn");
+            if (allPlayers.length > 0 && votedPlayerCount >= allPlayers.length) {
+              resBtn.className = "btn btn-gold";
+              resBtn.innerText = "All Votes In! Reveal Results 📊";
+            } else {
+              resBtn.className = "btn btn-cyan";
+              resBtn.innerText = "Reveal Results 📊";
+            }
 
             // Live Voter Tracker
             const votersList = document.getElementById("voters-list");
