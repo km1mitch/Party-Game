@@ -117,19 +117,19 @@
 
     /* Powerups Grid */
     .powerup-container {
-      display: flex;
-      gap: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
       margin: 15px 0 5px 0;
     }
 
     .powerup-btn {
-      flex: 1;
-      padding: 12px;
+      padding: 10px;
       border-radius: 12px;
       border: 1px solid rgba(255, 255, 255, 0.2);
       background: rgba(255, 255, 255, 0.05);
       color: #fff;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 700;
       cursor: pointer;
       transition: all 0.2s;
@@ -274,6 +274,16 @@
       line-height: 1.2;
     }
 
+    .reveal-box {
+      background: rgba(0, 243, 255, 0.08);
+      border: 1px solid var(--neon-cyan);
+      border-radius: 14px;
+      padding: 12px;
+      margin-top: 15px;
+      text-align: left;
+      font-size: 13px;
+    }
+
     .tally-row {
       display: flex;
       justify-content: space-between;
@@ -335,7 +345,9 @@
     <div style="color: #aaa; font-size: 12px; font-weight:700;">1-TIME WILDCARDS:</div>
     <div class="powerup-container">
       <button id="shield-btn" class="powerup-btn" onclick="togglePowerup('shield')">🛡️ Shield</button>
-      <button id="reverse-btn" class="powerup-btn" onclick="togglePowerup('reverse')">🔄 Uno Reverse</button>
+      <button id="reverse-btn" class="powerup-btn" onclick="togglePowerup('reverse')">🔄 Reverse</button>
+      <button id="double-btn" class="powerup-btn" onclick="togglePowerup('double')">✌️ Double</button>
+      <button id="reveal-btn" class="powerup-btn" onclick="togglePowerup('reveal')">🔍 Reveal</button>
     </div>
 
     <div id="voting-instruction" style="color: #aaa; font-size: 13px; margin-top:10px;">TAP A NAME TO VOTE:</div>
@@ -351,6 +363,12 @@
     <div class="q-tracker">QUESTION RECAP</div>
     <div id="reveal-question-text" class="question-text" style="font-size: 18px; margin-bottom: 15px;"></div>
     <div id="tally-display"></div>
+
+    <!-- PRIVATE VOTE REVEAL LOG FOR REVEAL LIFELINE -->
+    <div id="private-reveal-container" class="reveal-box hidden">
+      <div style="color: var(--neon-cyan); font-weight:700; margin-bottom:6px;">🔍 REVEAL LIFELINE LOG:</div>
+      <div id="private-reveal-list"></div>
+    </div>
     
     <div class="loser-stage">
       <div id="loser-header" class="loser-title">Takes The Shot 🥃</div>
@@ -363,7 +381,7 @@
   <!-- FINAL LEADERBOARD SCREEN -->
   <div id="leaderboard-screen" class="card hidden">
     <div class="q-tracker">HALL OF FAME 🏆</div>
-    <h2 style="color: var(--neon-gold); margin: 5px 0 15px 0;">NIGHT TOTALS</h2>
+    <h2 style="color: var(--neon-gold); margin: 5px 0 15px 0;">FINAL SCOREBOARD</h2>
     <div id="leaderboard-display"></div>
     <button class="btn btn-cyan" onclick="location.reload()" style="margin-top:25px;">Play Again 🔄</button>
   </div>
@@ -381,8 +399,7 @@
     let localPlayerName = "";
     let timerInterval = null;
 
-    let shieldUsed = false;
-    let reverseUsed = false;
+    let usedPowerups = { shield: false, reverse: false, double: false, reveal: false };
 
     // Web Audio Synthesizer SFX
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -474,7 +491,6 @@
       localPlayerName = name;
       currentRoomCode = code;
 
-      // Add joining player dynamically to the database player list
       onValue(ref(db, `rooms/${code}`), (snapshot) => {
         const data = snapshot.val();
         if (!data) return alert("Room not found!");
@@ -519,17 +535,12 @@
 
         const currentActive = (data.activePowerups && data.activePowerups[localPlayerName]) ? data.activePowerups[localPlayerName] : null;
 
-        if (type === 'shield') {
-          if (shieldUsed && currentActive !== 'shield') return alert("You already used your Shield tonight!");
-          const nextState = currentActive === 'shield' ? null : 'shield';
-          update(ref(db, `rooms/${currentRoomCode}/activePowerups`), { [localPlayerName]: nextState });
+        if (usedPowerups[type] && currentActive !== type) {
+          return alert(`You already used your ${type.toUpperCase()} lifeline tonight!`);
         }
 
-        if (type === 'reverse') {
-          if (reverseUsed && currentActive !== 'reverse') return alert("You already used your Uno Reverse tonight!");
-          const nextState = currentActive === 'reverse' ? null : 'reverse';
-          update(ref(db, `rooms/${currentRoomCode}/activePowerups`), { [localPlayerName]: nextState });
-        }
+        const nextState = currentActive === type ? null : type;
+        update(ref(db, `rooms/${currentRoomCode}/activePowerups`), { [localPlayerName]: nextState });
       }, { onlyOnce: true });
     };
 
@@ -548,6 +559,16 @@
         const totalQ = data.questions.length;
         const currentIdx = data.currentQIndex;
         const currentQuestion = data.questions[currentIdx];
+        const allPlayers = data.players || [];
+
+        // Check if all players have cast votes to trigger AUTO-REVEAL
+        const currentVotersMap = data.voters || {};
+        const activePowersMap = data.activePowerups || {};
+        const votedPlayerCount = Object.keys(currentVotersMap).length;
+
+        if (data.status === "voting" && allPlayers.length > 0 && votedPlayerCount >= allPlayers.length) {
+          if (isHost) triggerResults();
+        }
 
         if (data.status === "voting") {
           document.getElementById("vote-screen").classList.remove("hidden");
@@ -568,15 +589,18 @@
           }
 
           // Powerup Buttons state
-          const myPowerup = data.activePowerups ? data.activePowerups[localPlayerName] : null;
-          const shieldBtn = document.getElementById("shield-btn");
-          const reverseBtn = document.getElementById("reverse-btn");
+          const myPowerup = activePowersMap[localPlayerName] || null;
+          ['shield', 'reverse', 'double', 'reveal'].forEach(pType => {
+            const btn = document.getElementById(`${pType}-btn`);
+            btn.className = myPowerup === pType ? "powerup-btn active" : "powerup-btn";
+            if (usedPowerups[pType] && myPowerup !== pType) btn.disabled = true;
+          });
 
-          shieldBtn.className = myPowerup === 'shield' ? "powerup-btn active" : "powerup-btn";
-          reverseBtn.className = myPowerup === 'reverse' ? "powerup-btn active" : "powerup-btn";
-
-          if (shieldUsed && myPowerup !== 'shield') shieldBtn.disabled = true;
-          if (reverseUsed && myPowerup !== 'reverse') reverseBtn.disabled = true;
+          if (myPowerup === 'double') {
+            document.getElementById("voting-instruction").innerText = "DOUBLE ACTIVE: PICK 2 VOTES (TAP NAMES)";
+          } else {
+            document.getElementById("voting-instruction").innerText = "TAP A NAME TO VOTE:";
+          }
 
           if (isHost) {
             document.getElementById("start-timer-btn").classList.remove("hidden");
@@ -586,15 +610,15 @@
             // Live Voter Tracker
             const votersList = document.getElementById("voters-list");
             votersList.innerHTML = "";
-            const currentVoters = data.voters || {};
-            const currentPowers = data.activePowerups || {};
 
-            (data.players || []).forEach(p => {
-              const hasVoted = currentVoters[p];
-              const pPower = currentPowers[p];
+            allPlayers.forEach(p => {
+              const hasVoted = currentVotersMap[p];
+              const pPower = activePowersMap[p];
               let badgeIcon = hasVoted ? "✓" : "...";
               if (pPower === 'shield') badgeIcon += " 🛡️";
               if (pPower === 'reverse') badgeIcon += " 🔄";
+              if (pPower === 'double') badgeIcon += " ✌️";
+              if (pPower === 'reveal') badgeIcon += " 🔍";
 
               const badgeClass = hasVoted ? "voter-badge done" : "voter-badge";
               votersList.innerHTML += `<div class="${badgeClass}">${p} ${badgeIcon}</div>`;
@@ -607,16 +631,17 @@
             }
           }
 
-          // Render Voting Buttons (Automatically populates from connected players)
+          // Render Voting Buttons
           const list = document.getElementById("players-list");
           list.innerHTML = "";
-          const myCurrentChoice = data.voters ? data.voters[localPlayerName] : null;
+          const myCurrentChoices = currentVotersMap[localPlayerName] || [];
           const isLocked = data.timer === "TIME UP";
 
-          (data.players || []).forEach(p => {
-            const isSelected = myCurrentChoice === p;
+          allPlayers.forEach(p => {
+            const voteCount = myCurrentChoices.filter(c => c === p).length;
+            const isSelected = voteCount > 0;
             const btnClass = isSelected ? "vote-btn selected" : "vote-btn";
-            const btnText = isSelected ? `${p} ✓` : p;
+            const btnText = voteCount > 1 ? `${p} ✓ (${voteCount})` : isSelected ? `${p} ✓` : p;
             const disabledAttr = isLocked ? "disabled" : "";
             list.innerHTML += `<button class="${btnClass}" ${disabledAttr} onclick="castVote('${p}')">${btnText}</button>`;
           });
@@ -629,16 +654,29 @@
 
           document.getElementById("reveal-question-text").innerText = currentQuestion;
 
-          // Record if player consumed wildcard
-          const myPowerup = data.activePowerups ? data.activePowerups[localPlayerName] : null;
-          if (myPowerup === 'shield') shieldUsed = true;
-          if (myPowerup === 'reverse') reverseUsed = true;
+          // Consume used lifelines
+          const myPowerup = activePowersMap[localPlayerName] || null;
+          if (myPowerup) usedPowerups[myPowerup] = true;
+
+          // Private reveal for player who selected REVEAL lifeline
+          const revealBox = document.getElementById("private-reveal-container");
+          if (myPowerup === 'reveal') {
+            revealBox.classList.remove("hidden");
+            let revealLogHtml = "";
+            for (let [voter, targets] of Object.entries(currentVotersMap)) {
+              let targetList = Array.isArray(targets) ? targets.join(", ") : targets;
+              revealLogHtml += `<div><strong>${voter}</strong> voted for: <span style="color:var(--neon-gold)">${targetList}</span></div>`;
+            }
+            document.getElementById("private-reveal-list").innerHTML = revealLogHtml || "No votes logged.";
+          } else {
+            revealBox.classList.add("hidden");
+          }
 
           if (isHost) {
             const nextBtn = document.getElementById("next-btn");
             nextBtn.classList.remove("hidden");
             if (currentIdx + 1 >= totalQ) {
-              nextBtn.innerText = "See Final Standings 🏆";
+              nextBtn.innerText = "See Final Scoreboard 🏆";
             } else {
               nextBtn.innerText = "Next Question ➔";
             }
@@ -647,10 +685,10 @@
           let tallyHtml = "";
           let sortedVotes = [];
 
-          for (let p of (data.players || [])) {
+          for (let p of allPlayers) {
             const count = (data.roundVotes && data.roundVotes[p]) ? data.roundVotes[p] : 0;
-            const power = (data.activePowerups && data.activePowerups[p]) ? data.activePowerups[p] : null;
-            let pIcon = power === 'shield' ? " 🛡️" : power === 'reverse' ? " 🔄" : "";
+            const power = activePowersMap[p] || null;
+            let pIcon = power === 'shield' ? " 🛡️" : power === 'reverse' ? " 🔄" : power === 'double' ? " ✌️" : power === 'reveal' ? " 🔍" : "";
             
             tallyHtml += `<div class="tally-row"><span>${p}${pIcon}</span><span style="color:var(--neon-cyan)">${count} Votes</span></div>`;
             sortedVotes.push({ player: p, count: count, power: power });
@@ -669,8 +707,9 @@
             document.getElementById("loser-header").innerText = "🔄 UNO REVERSE ACTIVATED! VOTERS DRINK 🥃";
             
             let votersWhoVotedTop = [];
-            for (let [voter, target] of Object.entries(data.voters || {})) {
-              if (target === topWinner.player) votersWhoVotedTop.push(voter);
+            for (let [voter, targets] of Object.entries(currentVotersMap)) {
+              let targetArray = Array.isArray(targets) ? targets : [targets];
+              if (targetArray.includes(topWinner.player)) votersWhoVotedTop.push(voter);
             }
 
             document.getElementById("loser-name").innerText = votersWhoVotedTop.length ? votersWhoVotedTop.join(" & ") : "Voters!";
@@ -706,7 +745,7 @@
           let boardHtml = "";
           sorted.forEach(([player, count], idx) => {
             const medal = idx === 0 ? "🥇 " : idx === 1 ? "🥈 " : idx === 2 ? "🥉 " : "";
-            boardHtml += `<div class="tally-row"><span>${medal}${player}</span><span style="color:var(--neon-gold)">${count} Total Shots</span></div>`;
+            boardHtml += `<div class="tally-row"><span>${medal}${player}</span><span style="color:var(--neon-gold)">${count} Total Votes</span></div>`;
           });
           document.getElementById("leaderboard-display").innerHTML = boardHtml;
           confetti({ particleCount: 200, spread: 100, origin: { y: 0.4 } });
@@ -719,23 +758,44 @@
         const data = snapshot.val();
         if (!data || data.status !== "voting" || data.timer === "TIME UP") return;
 
-        const previousVote = data.voters ? data.voters[localPlayerName] : null;
-        if (previousVote === targetName) return; 
+        const myPower = (data.activePowerups && data.activePowerups[localPlayerName]) || null;
+        let myCurrentChoices = (data.voters && data.voters[localPlayerName]) ? [...data.voters[localPlayerName]] : [];
 
         let newRoundVotes = { ...(data.roundVotes || {}) };
         let newGrandTotals = { ...(data.grandTotals || {}) };
 
-        if (previousVote) {
-          newRoundVotes[previousVote] = Math.max(0, (newRoundVotes[previousVote] || 1) - 1);
-          newGrandTotals[previousVote] = Math.max(0, (newGrandTotals[previousVote] || 1) - 1);
-        }
+        if (myPower === 'double') {
+          // Double Powerup allows up to 2 choices
+          if (myCurrentChoices.length >= 2) {
+            // Reset previous two choices
+            myCurrentChoices.forEach(c => {
+              newRoundVotes[c] = Math.max(0, (newRoundVotes[c] || 1) - 1);
+              newGrandTotals[c] = Math.max(0, (newGrandTotals[c] || 1) - 1);
+            });
+            myCurrentChoices = [targetName];
+          } else {
+            myCurrentChoices.push(targetName);
+          }
 
-        newRoundVotes[targetName] = (newRoundVotes[targetName] || 0) + 1;
-        newGrandTotals[targetName] = (newGrandTotals[targetName] || 0) + 1;
+          newRoundVotes[targetName] = (newRoundVotes[targetName] || 0) + 1;
+          newGrandTotals[targetName] = (newGrandTotals[targetName] || 0) + 1;
+
+        } else {
+          // Standard Single Vote
+          if (myCurrentChoices.length > 0) {
+            myCurrentChoices.forEach(c => {
+              newRoundVotes[c] = Math.max(0, (newRoundVotes[c] || 1) - 1);
+              newGrandTotals[c] = Math.max(0, (newGrandTotals[c] || 1) - 1);
+            });
+          }
+          myCurrentChoices = [targetName];
+          newRoundVotes[targetName] = (newRoundVotes[targetName] || 0) + 1;
+          newGrandTotals[targetName] = (newGrandTotals[targetName] || 0) + 1;
+        }
 
         update(ref(db, `rooms/${currentRoomCode}/roundVotes`), newRoundVotes);
         update(ref(db, `rooms/${currentRoomCode}/grandTotals`), newGrandTotals);
-        update(ref(db, `rooms/${currentRoomCode}/voters`), { [localPlayerName]: targetName });
+        update(ref(db, `rooms/${currentRoomCode}/voters`), { [localPlayerName]: myCurrentChoices });
       }, { onlyOnce: true });
     };
 
