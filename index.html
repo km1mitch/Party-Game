@@ -325,9 +325,9 @@
     <h2>Host Control Center</h2>
     <input type="text" id="host-name" placeholder="Host Player Name">
     <p style="color: #aaa; margin: 10px 0 0 0; font-size: 13px;">Paste Questions List Below:</p>
-    <textarea id="game-questions" placeholder="Paste your questions here..." oninput="updateCount()"></textarea>
+    <textarea id="game-questions" placeholder="Paste questions here (one per line)..." oninput="updateCount()"></textarea>
     <div id="question-count" style="color: var(--neon-cyan); font-weight: 700; font-size: 14px; margin-bottom: 10px;">0 Questions Detected</div>
-    <button class="btn btn-primary" onclick="createRoom()">Launch Game & Show QR</button>
+    <button id="launch-btn" class="btn btn-primary" onclick="createRoom()">Launch Game & Show QR</button>
   </div>
 
   <!-- VOTING SCREEN -->
@@ -369,7 +369,6 @@
     <div id="reveal-question-text" class="question-text" style="font-size: 18px; margin-bottom: 15px;"></div>
     <div id="tally-display"></div>
 
-    <!-- PRIVATE VOTE REVEAL LOG FOR REVEAL LIFELINE -->
     <div id="private-reveal-container" class="reveal-box hidden">
       <div style="color: var(--neon-cyan); font-weight:700; margin-bottom:6px;">🔍 REVEAL LIFELINE LOG:</div>
       <div id="private-reveal-list"></div>
@@ -406,21 +405,30 @@
 
     let usedPowerups = { shield: false, reverse: false, double: false, reveal: false };
 
-    // Web Audio Synthesizer SFX
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let audioCtx = null;
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      return audioCtx;
+    }
+
     function playTone(freq, duration, type="sine") {
       try {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
+        const ctx = getAudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
         osc.type = type;
         osc.frequency.value = freq;
         osc.connect(gain);
-        gain.connect(audioCtx.destination);
+        gain.connect(ctx.destination);
         osc.start();
-        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
-        osc.stop(audioCtx.currentTime + duration);
-      } catch(e){}
+        gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + duration);
+        osc.stop(ctx.currentTime + duration);
+      } catch(e) {}
     }
 
     function sfxTick() { playTone(800, 0.05, "square"); }
@@ -438,10 +446,9 @@
     function parseQuestions(rawText) {
       if (!rawText) return [];
       return rawText
-        .split(/\r?\n|\r|\? /)
+        .split(/\r?\n/)
         .map(q => q.trim())
-        .map(q => (q.length > 0 && !q.endsWith('?') && !q.endsWith('.')) ? q + '?' : q)
-        .filter(q => q.length > 3);
+        .filter(q => q.length > 0);
     }
 
     window.updateCount = function() {
@@ -455,39 +462,60 @@
       document.getElementById("setup-screen").classList.remove("hidden");
     };
 
-    window.createRoom = function() {
-      const hostName = document.getElementById("host-name").value.trim();
-      const rawQuestions = document.getElementById("game-questions").value;
-      const questions = parseQuestions(rawQuestions);
+    window.createRoom = async function() {
+      try {
+        getAudioContext();
+        const hostName = document.getElementById("host-name").value.trim();
+        const rawQuestions = document.getElementById("game-questions").value;
+        const questions = parseQuestions(rawQuestions);
 
-      if (!hostName) return alert("Enter your name as host!");
-      if (!questions.length) return alert("Paste at least one question!");
+        if (!hostName) {
+          alert("Please enter your name as the host!");
+          return;
+        }
+        if (questions.length === 0) {
+          alert("Please paste at least one question into the box!");
+          return;
+        }
 
-      localPlayerName = hostName;
-      currentRoomCode = Math.floor(1000 + Math.random() * 9000).toString();
-      isHost = true;
+        const launchBtn = document.getElementById("launch-btn");
+        launchBtn.innerText = "Launching...";
+        launchBtn.disabled = true;
 
-      let grandTotals = {};
-      grandTotals[hostName] = 0;
+        localPlayerName = hostName;
+        currentRoomCode = Math.floor(1000 + Math.random() * 9000).toString();
+        isHost = true;
 
-      const roomRef = ref(db, "rooms/" + currentRoomCode);
-      set(roomRef, {
-        players: [hostName],
-        questions: questions,
-        currentQIndex: 0,
-        roundVotes: {},
-        voters: {},
-        activePowerups: {},
-        grandTotals: grandTotals,
-        timer: "READY",
-        timerRunning: false,
-        status: "voting"
-      }).then(() => {
+        let grandTotals = {};
+        grandTotals[hostName] = 0;
+
+        const roomRef = ref(db, "rooms/" + currentRoomCode);
+        await set(roomRef, {
+          players: [hostName],
+          questions: questions,
+          currentQIndex: 0,
+          roundVotes: {},
+          voters: {},
+          activePowerups: {},
+          grandTotals: grandTotals,
+          timer: "READY",
+          timerRunning: false,
+          status: "voting"
+        });
+
         listenToRoom();
-      });
+      } catch (err) {
+        alert("Launch error: " + err.message);
+        const launchBtn = document.getElementById("launch-btn");
+        if (launchBtn) {
+          launchBtn.innerText = "Launch Game & Show QR";
+          launchBtn.disabled = false;
+        }
+      }
     };
 
     window.joinRoom = function() {
+      getAudioContext();
       const name = document.getElementById("player-name-input").value.trim();
       const code = document.getElementById("join-code-input").value.trim();
       if (!name) return alert("Enter your name to join!");
@@ -506,35 +534,7 @@
           let grandTotals = data.grandTotals || {};
           grandTotals[name] = 0;
 
-          update(ref(db, `rooms/${code}`), { 
-            players: currentPlayers,
-            grandTotals: grandTotals
-          });
-        }
-        listenToRoom();
-      }, { onlyOnce: true });
-    };
-
-    window.startVotingTimer = function() {
-      if (!isHost) return;
-      if (timerInterval) clearInterval(timerInterval);
-
-      let timeLeft = 10;
-      update(ref(db, "rooms/" + currentRoomCode), { timer: timeLeft, timerRunning: true });
-
-      timerInterval = setInterval(() => {
-        timeLeft--;
-        if (timeLeft >= 0) {
-          update(ref(db, "rooms/" + currentRoomCode), { timer: timeLeft });
-        } else {
-          clearInterval(timerInterval);
-          update(ref(db, "rooms/" + currentRoomCode), { timer: "TIME UP", timerRunning: false });
-        }
-      }, 1000);
-    };
-
-    window.togglePowerup = function(type) {
-      onValue(ref(db, `rooms/${currentRoomCode}`), (snapshot) => {
+          update(ref(db, `rooms/${code}`), { players: currentPlayers, grandTotals: grandTotals }); } listenToRoom(); }, { onlyOnce: true }); };  window.startVotingTimer = function() { if (!isHost) return; if (timerInterval) clearInterval(timerInterval);  let timeLeft = 10; update(ref(db, "rooms/" + currentRoomCode), { timer: timeLeft, timerRunning: true });  timerInterval = setInterval(() => { timeLeft--; if (timeLeft >= 0) { update(ref(db, "rooms/" + currentRoomCode), { timer: timeLeft }); } else { clearInterval(timerInterval); update(ref(db, "rooms/" + currentRoomCode), { timer: "TIME UP", timerRunning: false }); } }, 1000); };  window.togglePowerup = function(type) { onValue(ref(db, `rooms/${currentRoomCode}`), (snapshot) => {
         const data = snapshot.val();
         if (!data || data.status !== "voting" || data.timer === "TIME UP") return;
 
@@ -545,53 +545,7 @@
         }
 
         const nextState = currentActive === type ? null : type;
-        update(ref(db, `rooms/${currentRoomCode}/activePowerups`), { [localPlayerName]: nextState });
-      }, { onlyOnce: true });
-    };
-
-    function listenToRoom() {
-      const roomRef = ref(db, "rooms/" + currentRoomCode);
-      
-      onValue(roomRef, (snapshot) => {
-        const data = snapshot.val();
-        if (!data) return alert("Room not found!");
-
-        document.getElementById("room-display").innerText = "ROOM: " + currentRoomCode;
-        document.getElementById("room-display").classList.remove("hidden");
-        document.getElementById("entry-screen").classList.add("hidden");
-        document.getElementById("setup-screen").classList.add("hidden");
-
-        const totalQ = data.questions.length;
-        const currentIdx = data.currentQIndex;
-        const currentQuestion = data.questions[currentIdx];
-        const allPlayers = data.players || [];
-
-        const currentVotersMap = data.voters || {};
-        const activePowersMap = data.activePowerups || {};
-        const votedPlayerCount = Object.keys(currentVotersMap).length;
-
-        if (data.status === "voting") {
-          document.getElementById("vote-screen").classList.remove("hidden");
-          document.getElementById("result-screen").classList.add("hidden");
-          document.getElementById("leaderboard-screen").classList.add("hidden");
-          
-          document.getElementById("q-tracker").innerText = `QUESTION ${currentIdx + 1} OF ${totalQ}`;
-          document.getElementById("display-question").innerText = currentQuestion;
-
-          // Sync Timer
-          const timerBox = document.getElementById("timer-display");
-          const previousVal = timerBox.innerText;
-          timerBox.innerText = data.timer;
-
-          if (data.timer !== previousVal) {
-            if (typeof data.timer === "number" && data.timer > 0 && data.timer <= 5) sfxTick();
-            if (data.timer === "TIME UP") sfxBuzzer();
-          }
-
-          // Powerup Buttons state
-          const myPowerup = activePowersMap[localPlayerName] || null;
-          ['shield', 'reverse', 'double', 'reveal'].forEach(pType => {
-            const btn = document.getElementById(`${pType}-btn`);
+        update(ref(db, `rooms/${currentRoomCode}/activePowerups`), { [localPlayerName]: nextState }); }, { onlyOnce: true }); };  function listenToRoom() { const roomRef = ref(db, "rooms/" + currentRoomCode);  onValue(roomRef, (snapshot) => { const data = snapshot.val(); if (!data) return;  document.getElementById("room-display").innerText = "ROOM: " + currentRoomCode; document.getElementById("room-display").classList.remove("hidden"); document.getElementById("entry-screen").classList.add("hidden"); document.getElementById("setup-screen").classList.add("hidden");  const totalQ = data.questions.length; const currentIdx = data.currentQIndex; const currentQuestion = data.questions[currentIdx]; const allPlayers = data.players \vert{}\vert{} [];  const currentVotersMap = data.voters \vert{}\vert{} {}; const activePowersMap = data.activePowerups \vert{}\vert{} {}; const votedPlayerCount = Object.keys(currentVotersMap).length;  if (data.status === "voting") { document.getElementById("vote-screen").classList.remove("hidden"); document.getElementById("result-screen").classList.add("hidden"); document.getElementById("leaderboard-screen").classList.add("hidden");  document.getElementById("q-tracker").innerText = `QUESTION ${currentIdx + 1} OF ${totalQ}`; document.getElementById("display-question").innerText = currentQuestion;  // Sync Timer const timerBox = document.getElementById("timer-display"); const previousVal = timerBox.innerText; timerBox.innerText = data.timer;  if (data.timer !== previousVal) { if (typeof data.timer === "number" && data.timer > 0 && data.timer <= 5) sfxTick(); if (data.timer === "TIME UP") sfxBuzzer(); }  // Powerup Buttons state const myPowerup = activePowersMap[localPlayerName] \vert{}\vert{} null; ['shield', 'reverse', 'double', 'reveal'].forEach(pType => { const btn = document.getElementById(`${pType}-btn`);
             btn.className = myPowerup === pType ? "powerup-btn active" : "powerup-btn";
             if (usedPowerups[pType] && myPowerup !== pType) btn.disabled = true;
           });
@@ -630,51 +584,9 @@
               if (pPower === 'reveal') badgeIcon += " 🔍";
 
               const badgeClass = hasVoted ? "voter-badge done" : "voter-badge";
-              votersList.innerHTML += `<div class="${badgeClass}">${p} ${badgeIcon}</div>`;
-            });
-
-            if (document.getElementById("qrcode").innerHTML === "") {
-              document.getElementById("qr-container").classList.remove("hidden");
-              const joinUrl = window.location.origin + window.location.pathname + "?room=" + currentRoomCode;
-              new QRCode(document.getElementById("qrcode"), { text: joinUrl, width: 130, height: 130 });
-            }
-          }
-
-          // Render Voting Buttons
-          const list = document.getElementById("players-list");
-          list.innerHTML = "";
-          const myCurrentChoices = currentVotersMap[localPlayerName] || [];
-          const isLocked = data.timer === "TIME UP";
-
-          allPlayers.forEach(p => {
-            const voteCount = myCurrentChoices.filter(c => c === p).length;
-            const isSelected = voteCount > 0;
-            const btnClass = isSelected ? "vote-btn selected" : "vote-btn";
-            const btnText = voteCount > 1 ? `${p} ✓ (${voteCount})` : isSelected ? `${p} ✓` : p;
+              votersList.innerHTML += `<div class="${badgeClass}">${p} ${badgeIcon}</div>`; });  if (document.getElementById("qrcode").innerHTML === "") { document.getElementById("qr-container").classList.remove("hidden"); const joinUrl = window.location.origin + window.location.pathname + "?room=" + currentRoomCode; new QRCode(document.getElementById("qrcode"), { text: joinUrl, width: 130, height: 130 }); } }  // Render Voting Buttons const list = document.getElementById("players-list"); list.innerHTML = ""; const myCurrentChoices = currentVotersMap[localPlayerName] \vert{}\vert{} []; const isLocked = data.timer === "TIME UP";  allPlayers.forEach(p => { const voteCount = myCurrentChoices.filter(c => c === p).length; const isSelected = voteCount > 0; const btnClass = isSelected ? "vote-btn selected" : "vote-btn"; const btnText = voteCount > 1 ? `${p} ✓ (${voteCount})` : isSelected ? `${p} ✓` : p;
             const disabledAttr = isLocked ? "disabled" : "";
-            list.innerHTML += `<button class="${btnClass}" ${disabledAttr} onclick="castVote('${p}')">${btnText}</button>`;
-          });
-        }
-
-        if (data.status === "results") {
-          if (timerInterval) clearInterval(timerInterval);
-          document.getElementById("vote-screen").classList.add("hidden");
-          document.getElementById("result-screen").classList.remove("hidden");
-
-          document.getElementById("reveal-question-text").innerText = currentQuestion;
-
-          // Consume used lifelines
-          const myPowerup = activePowersMap[localPlayerName] || null;
-          if (myPowerup) usedPowerups[myPowerup] = true;
-
-          // Private reveal for player who selected REVEAL lifeline
-          const revealBox = document.getElementById("private-reveal-container");
-          if (myPowerup === 'reveal') {
-            revealBox.classList.remove("hidden");
-            let revealLogHtml = "";
-            for (let [voter, targets] of Object.entries(currentVotersMap)) {
-              let targetList = Array.isArray(targets) ? targets.join(", ") : targets;
-              revealLogHtml += `<div><strong>${voter}</strong> voted for: <span style="color:var(--neon-gold)">${targetList}</span></div>`;
+            list.innerHTML += `<button class="${btnClass}" ${disabledAttr} onclick="castVote('${p}')">${btnText}</button>`; }); }  if (data.status === "results") { if (timerInterval) clearInterval(timerInterval); document.getElementById("vote-screen").classList.add("hidden"); document.getElementById("result-screen").classList.remove("hidden");  document.getElementById("reveal-question-text").innerText = currentQuestion;  // Consume used lifelines const myPowerup = activePowersMap[localPlayerName] \vert{}\vert{} null; if (myPowerup) usedPowerups[myPowerup] = true;  // Private reveal for player who selected REVEAL lifeline const revealBox = document.getElementById("private-reveal-container"); if (myPowerup === 'reveal') { revealBox.classList.remove("hidden"); let revealLogHtml = ""; for (let [voter, targets] of Object.entries(currentVotersMap)) { let targetList = Array.isArray(targets) ? targets.join(", ") : targets; revealLogHtml += `<div><strong>${voter}</strong> voted for: <span style="color:var(--neon-gold)">${targetList}</span></div>`;
             }
             document.getElementById("private-reveal-list").innerHTML = revealLogHtml || "No votes logged.";
           } else {
@@ -728,7 +640,7 @@
           else if (topWinner.power === 'shield') {
             document.getElementById("loser-header").innerText = "🛡️ SHIELD ACTIVATED! 2ND PLACE TAKES SHOT 🥃";
             const secondPlace = sortedVotes[1] ? sortedVotes[1].player : "Nobody";
-            document.getElementById("loser-name").innerText = `${secondPlace} (Shielded: ${topWinner.player})`;
+            document.getElementById("loser-name").innerText = `${secondPlace} (Shielded:${topWinner.player})`;
             sfxFanfare();
             confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
           } 
@@ -754,86 +666,4 @@
           let boardHtml = "";
           sorted.forEach(([player, count], idx) => {
             const medal = idx === 0 ? "🥇 " : idx === 1 ? "🥈 " : idx === 2 ? "🥉 " : "";
-            boardHtml += `<div class="tally-row"><span>${medal}${player}</span><span style="color:var(--neon-gold)">${count} Total Votes</span></div>`;
-          });
-          document.getElementById("leaderboard-display").innerHTML = boardHtml;
-          confetti({ particleCount: 200, spread: 100, origin: { y: 0.4 } });
-        }
-      });
-    }
-
-    window.castVote = function(targetName) {
-      onValue(ref(db, `rooms/${currentRoomCode}`), (snapshot) => {
-        const data = snapshot.val();
-        if (!data || data.status !== "voting" || data.timer === "TIME UP") return;
-
-        const myPower = (data.activePowerups && data.activePowerups[localPlayerName]) || null;
-        let myCurrentChoices = (data.voters && data.voters[localPlayerName]) ? [...data.voters[localPlayerName]] : [];
-
-        let newRoundVotes = { ...(data.roundVotes || {}) };
-        let newGrandTotals = { ...(data.grandTotals || {}) };
-
-        if (myPower === 'double') {
-          if (myCurrentChoices.length >= 2) {
-            myCurrentChoices.forEach(c => {
-              newRoundVotes[c] = Math.max(0, (newRoundVotes[c] || 1) - 1);
-              newGrandTotals[c] = Math.max(0, (newGrandTotals[c] || 1) - 1);
-            });
-            myCurrentChoices = [targetName];
-          } else {
-            myCurrentChoices.push(targetName);
-          }
-
-          newRoundVotes[targetName] = (newRoundVotes[targetName] || 0) + 1;
-          newGrandTotals[targetName] = (newGrandTotals[targetName] || 0) + 1;
-
-        } else {
-          if (myCurrentChoices.length > 0) {
-            myCurrentChoices.forEach(c => {
-              newRoundVotes[c] = Math.max(0, (newRoundVotes[c] || 1) - 1);
-              newGrandTotals[c] = Math.max(0, (newGrandTotals[c] || 1) - 1);
-            });
-          }
-          myCurrentChoices = [targetName];
-          newRoundVotes[targetName] = (newRoundVotes[targetName] || 0) + 1;
-          newGrandTotals[targetName] = (newGrandTotals[targetName] || 0) + 1;
-        }
-
-        update(ref(db, `rooms/${currentRoomCode}/roundVotes`), newRoundVotes);
-        update(ref(db, `rooms/${currentRoomCode}/grandTotals`), newGrandTotals);
-        update(ref(db, `rooms/${currentRoomCode}/voters`), { [localPlayerName]: myCurrentChoices });
-      }, { onlyOnce: true });
-    };
-
-    window.triggerResults = function() {
-      if (!isHost) return;
-      if (timerInterval) clearInterval(timerInterval);
-      update(ref(db, "rooms/" + currentRoomCode), { status: "results" });
-    };
-
-    window.nextQuestion = function() {
-      if (!isHost) return;
-
-      onValue(ref(db, "rooms/" + currentRoomCode), (snapshot) => {
-        const data = snapshot.val();
-        const nextIndex = data.currentQIndex + 1;
-
-        if (nextIndex >= data.questions.length) {
-          update(ref(db, "rooms/" + currentRoomCode), { status: "leaderboard" });
-          return;
-        }
-
-        update(ref(db, "rooms/" + currentRoomCode), {
-          currentQIndex: nextIndex,
-          roundVotes: {},
-          voters: {},
-          activePowerups: {},
-          timer: "READY",
-          timerRunning: false,
-          status: "voting"
-        });
-      }, { onlyOnce: true });
-    };
-  </script>
-</body>
-</html>
+            boardHtml += `<div class="tally-row"><span>${medal}${player}
